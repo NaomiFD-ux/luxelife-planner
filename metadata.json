@@ -1,0 +1,9 @@
+
+{
+  "name": "LuxeLife OS",
+  "description": "A premium, all-in-one life management platform designed to unify finance, education, nutrition, career, and spirituality into a single, luxurious experience.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
