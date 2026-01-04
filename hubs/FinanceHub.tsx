@@ -81,6 +81,23 @@ interface OneTimeItem {
 const FinanceHub: React.FC = () => {
   const [currentView, setCurrentView] = useState<FinanceSubView>('overview');
 
+  // Confirmation modal state
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+
+  const confirmDelete = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirm = () => {
+    if (confirmAction) confirmAction();
+    setShowConfirmModal(false);
+    setConfirmAction(null);
+  };
+
   useEffect(() => {
     const handleSubNav = (e: any) => {
       if (e.detail && e.detail.subView) {
@@ -1615,10 +1632,10 @@ const FinanceHub: React.FC = () => {
     };
 
     const handleDeleteSavingsGoal = (id: string) => {
-      if (confirm('Are you sure you want to delete this savings goal?')) {
-        // TODO: Implement delete functionality
-        console.log('Delete savings goal:', id);
-      }
+      confirmDelete(
+        'Are you sure you want to delete this savings goal?',
+        () => setSavingsGoals(savingsGoals.filter(goal => goal.id !== id))
+      );
     };
 
     const handleSaveSavingsGoal = () => {
@@ -1626,8 +1643,30 @@ const FinanceHub: React.FC = () => {
         alert('Please fill in all required fields');
         return;
       }
-      // TODO: Implement save functionality
-      console.log('Save savings goal:', savingsForm);
+
+      const savingsData = {
+        name: savingsForm.name,
+        targetAmount: savingsForm.targetAmount,
+        currentAmount: savingsForm.currentAmount,
+        deadline: savingsForm.deadline
+      };
+
+      if (editingSavingsGoal) {
+        // Update existing savings goal
+        setSavingsGoals(savingsGoals.map(goal =>
+          goal.id === editingSavingsGoal.id
+            ? { ...goal, ...savingsData }
+            : goal
+        ));
+      } else {
+        // Add new savings goal
+        const newGoal: SavingsGoal = {
+          id: `sg${Date.now()}`,
+          ...savingsData
+        };
+        setSavingsGoals([...savingsGoals, newGoal]);
+      }
+
       setShowSavingsModal(false);
     };
 
@@ -1965,10 +2004,10 @@ const FinanceHub: React.FC = () => {
     };
 
     const handleDeleteDebt = (id: string) => {
-      if (confirm('Are you sure you want to delete this debt?')) {
-        // TODO: Implement delete functionality
-        console.log('Delete debt:', id);
-      }
+      confirmDelete(
+        'Are you sure you want to delete this debt?',
+        () => setDebts(debts.filter(debt => debt.id !== id))
+      );
     };
 
     const handleSaveDebt = () => {
@@ -1976,8 +2015,32 @@ const FinanceHub: React.FC = () => {
         alert('Please fill in all required fields');
         return;
       }
-      // TODO: Implement save functionality
-      console.log('Save debt:', debtForm);
+
+      const debtData = {
+        name: debtForm.name,
+        totalAmount: debtForm.totalAmount,
+        remainingAmount: debtForm.remainingAmount,
+        interestRate: debtForm.interestRate,
+        minimumPayment: debtForm.minimumPayment,
+        dueDate: debtForm.dueDate
+      };
+
+      if (editingDebt) {
+        // Update existing debt
+        setDebts(debts.map(debt =>
+          debt.id === editingDebt.id
+            ? { ...debt, ...debtData }
+            : debt
+        ));
+      } else {
+        // Add new debt
+        const newDebt: Debt = {
+          id: `d${Date.now()}`,
+          ...debtData
+        };
+        setDebts([...debts, newDebt]);
+      }
+
       setShowDebtModal(false);
     };
 
@@ -2730,9 +2793,10 @@ const FinanceHub: React.FC = () => {
     };
 
     const handleDeleteIncome = (id: string) => {
-      if (confirm('Are you sure you want to delete this income source?')) {
-        setIncomes(incomes.filter(income => income.id !== id));
-      }
+      confirmDelete(
+        'Are you sure you want to delete this income source?',
+        () => setIncomes(incomes.filter(income => income.id !== id))
+      );
     };
 
     const handleSaveIncome = () => {
@@ -2814,9 +2878,10 @@ const FinanceHub: React.FC = () => {
     };
 
     const handleDeleteBill = (id: string) => {
-      if (confirm('Are you sure you want to delete this bill?')) {
-        setBills(bills.filter(bill => bill.id !== id));
-      }
+      confirmDelete(
+        'Are you sure you want to delete this bill?',
+        () => setBills(bills.filter(bill => bill.id !== id))
+      );
     };
 
     const handleSaveBill = () => {
@@ -2927,9 +2992,10 @@ const FinanceHub: React.FC = () => {
     };
 
     const handleDeleteSubscription = (id: string) => {
-      if (confirm('Are you sure you want to delete this subscription?')) {
-        setSubscriptions(subscriptions.filter(sub => sub.id !== id));
-      }
+      confirmDelete(
+        'Are you sure you want to delete this subscription?',
+        () => setSubscriptions(subscriptions.filter(sub => sub.id !== id))
+      );
     };
 
     const handleSaveSubscription = () => {
@@ -3046,9 +3112,10 @@ const FinanceHub: React.FC = () => {
     };
 
     const handleDeleteExpense = (id: string) => {
-      if (confirm('Are you sure you want to delete this recurring expense?')) {
-        setRecurringExpenses(recurringExpenses.filter(expense => expense.id !== id));
-      }
+      confirmDelete(
+        'Are you sure you want to delete this recurring expense?',
+        () => setRecurringExpenses(recurringExpenses.filter(expense => expense.id !== id))
+      );
     };
 
     const handleSaveExpense = () => {
@@ -4103,6 +4170,47 @@ const FinanceHub: React.FC = () => {
   return (
     <div className="h-full">
       {renderContent()}
+
+      {/* Custom Confirmation Modal */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-3xl shadow-2xl max-w-md w-full">
+            {/* Modal Header */}
+            <div className="p-6 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center gap-4">
+                <div className="size-12 rounded-2xl bg-red-100 dark:bg-red-950/30 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-2xl">warning</span>
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-text-main dark:text-white">Confirm Delete</h2>
+                  <p className="text-sm text-text-muted">This action cannot be undone</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              <p className="text-text-main dark:text-white">{confirmMessage}</p>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-6 border-t border-gray-100 dark:border-gray-800 flex gap-3">
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                className="flex-1 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-background-dark text-text-main dark:text-white font-bold hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirm}
+                className="flex-1 px-4 py-3 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold shadow-lg shadow-red-500/20 transition-all"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
