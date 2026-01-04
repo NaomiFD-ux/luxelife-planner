@@ -3,7 +3,8 @@ import {
   User,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   updateProfile
@@ -47,6 +48,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return unsubscribe;
   }, []);
 
+  // Handle redirect result from Google sign-in
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result) {
+          // Successfully signed in via redirect
+          console.log('Google sign-in successful via redirect');
+        }
+      })
+      .catch((error) => {
+        console.error('Error handling redirect result:', error);
+      });
+  }, []);
+
   // Sign up with email and password
   const signUp = async (email: string, password: string, displayName?: string) => {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -62,9 +77,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     await signInWithEmailAndPassword(auth, email, password);
   };
 
-  // Sign in with Google
+  // Sign in with Google (using redirect instead of popup)
   const signInWithGoogle = async () => {
-    await signInWithPopup(auth, googleProvider);
+    await signInWithRedirect(auth, googleProvider);
   };
 
   // Sign out
