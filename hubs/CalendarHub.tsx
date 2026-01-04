@@ -141,12 +141,43 @@ const formatTime = (time24: string): string => {
 // ===== WEEK VIEW COMPONENT =====
 interface CalendarGridProps {
   events: CalendarEvent[];
+  currentDate: Date;
 }
 
-const CalendarGrid: React.FC<CalendarGridProps> = ({ events }) => {
+const CalendarGrid: React.FC<CalendarGridProps> = ({ events, currentDate }) => {
   const [selectedTimezone, setSelectedTimezone] = React.useState('EST');
   const [currentTimePosition, setCurrentTimePosition] = React.useState(0);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+
+  // Generate week days based on current date
+  const generateWeekDays = () => {
+    const days = [];
+    const startOfWeek = new Date(currentDate);
+    startOfWeek.setDate(currentDate.getDate() - currentDate.getDay()); // Go to Sunday
+
+    const dayLabels = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+    const today = new Date();
+
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(startOfWeek);
+      day.setDate(startOfWeek.getDate() + i);
+
+      const isToday = day.getDate() === today.getDate() &&
+                      day.getMonth() === today.getMonth() &&
+                      day.getFullYear() === today.getFullYear();
+
+      days.push({
+        label: dayLabels[i],
+        day: day.getDate(),
+        active: isToday,
+        fullDate: day
+      });
+    }
+
+    return days;
+  };
+
+  const weekDays = generateWeekDays();
 
   // Update current time position based on timezone
   React.useEffect(() => {
@@ -228,7 +259,7 @@ const CalendarGrid: React.FC<CalendarGridProps> = ({ events }) => {
             <option value="UTC">UTC</option>
           </select>
         </div>
-        {DAYS_OF_WEEK.map((day, idx) => (
+        {weekDays.map((day, idx) => (
           <div
             key={idx}
             className={`py-3 text-center border-r border-gray-100 dark:border-gray-800 transition-colors ${
@@ -940,13 +971,13 @@ const CalendarHub: React.FC = () => {
       case CalendarMode.DAY:
         return <DayView events={localEvents} activeDayIndex={currentDate.getDay()} />;
       case CalendarMode.WEEK:
-        return <CalendarGrid events={localEvents} />;
+        return <CalendarGrid events={localEvents} currentDate={currentDate} />;
       case CalendarMode.MONTH:
         return <MonthView events={localEvents} />;
       case CalendarMode.YEAR:
         return <YearView onMonthClick={handleMonthClickFromYear} />;
       default:
-        return <CalendarGrid events={localEvents} />;
+        return <CalendarGrid events={localEvents} currentDate={currentDate} />;
     }
   };
 
