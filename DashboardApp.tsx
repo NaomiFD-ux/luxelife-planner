@@ -134,15 +134,15 @@ const DashboardApp: React.FC = () => {
 
   return (
     <EventsProvider>
-      <GoogleCalendarProvider>
-        <SyncSettingsProvider>
+      <SyncSettingsProvider>
+        <GoogleCalendarProvider>
           <DashboardAppContext.Provider value={{ activeHub, setActiveHub, user, isDark, setIsDark, enabledHubs, setEnabledHubs }}>
             <MainLayout>
               {renderHub()}
             </MainLayout>
           </DashboardAppContext.Provider>
-        </SyncSettingsProvider>
-      </GoogleCalendarProvider>
+        </GoogleCalendarProvider>
+      </SyncSettingsProvider>
     </EventsProvider>
   );
 };
