@@ -350,11 +350,22 @@ const CalendarGrid: React.FC<CalendarGridProps> = ({ events, currentDate }) => {
 interface DayViewProps {
   events: CalendarEvent[];
   activeDayIndex: number;
+  currentDate: Date;
+  onPreviousDay: () => void;
+  onNextDay: () => void;
 }
 
-const DayView: React.FC<DayViewProps> = ({ events, activeDayIndex }) => {
+const DayView: React.FC<DayViewProps> = ({ events, activeDayIndex, currentDate, onPreviousDay, onNextDay }) => {
   const dayEvents = events.filter(e => e.dayIndex === activeDayIndex);
   const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+
+  // Format date for display
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const dayName = dayNames[currentDate.getDay()];
+  const monthName = monthNames[currentDate.getMonth()];
+  const dayNum = currentDate.getDate();
+  const year = currentDate.getFullYear();
 
   // Auto-scroll to current time on mount
   React.useEffect(() => {
@@ -393,8 +404,22 @@ const DayView: React.FC<DayViewProps> = ({ events, activeDayIndex }) => {
     <div className="flex-1 overflow-hidden flex flex-col bg-white dark:bg-surface-dark rounded-3xl border border-gray-100 dark:border-gray-800 shadow-sm">
       <div className="p-6 border-b border-gray-100 dark:border-gray-800 bg-white/80 dark:bg-surface-dark/80 backdrop-blur-sm sticky top-0 z-10 flex items-center justify-between">
         <div>
-          <h3 className="text-xl font-black text-text-main dark:text-white">Wednesday</h3>
-          <p className="text-sm font-bold text-text-muted">January 8, 2026</p>
+          <h3 className="text-xl font-black text-text-main dark:text-white">{dayName}</h3>
+          <p className="text-sm font-bold text-text-muted">{monthName} {dayNum}, {year}</p>
+        </div>
+        <div className="flex gap-1">
+          <button
+            onClick={onPreviousDay}
+            className="size-10 rounded-xl hover:bg-background-light dark:hover:bg-background-dark hover:shadow-sm flex items-center justify-center text-text-muted hover:text-primary transition-all"
+          >
+            <span className="material-symbols-outlined font-bold">chevron_left</span>
+          </button>
+          <button
+            onClick={onNextDay}
+            className="size-10 rounded-xl hover:bg-background-light dark:hover:bg-background-dark hover:shadow-sm flex items-center justify-center text-text-muted hover:text-primary transition-all"
+          >
+            <span className="material-symbols-outlined font-bold">chevron_right</span>
+          </button>
         </div>
       </div>
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto relative">
@@ -897,6 +922,19 @@ const CalendarHub: React.FC = () => {
     setCalendarMode(CalendarMode.MONTH);
   };
 
+  // Day navigation
+  const goToPreviousDay = () => {
+    const newDate = new Date(currentDate);
+    newDate.setDate(newDate.getDate() - 1);
+    setCurrentDate(newDate);
+  };
+
+  const goToNextDay = () => {
+    const newDate = new Date(currentDate);
+    newDate.setDate(newDate.getDate() + 1);
+    setCurrentDate(newDate);
+  };
+
   // Week navigation
   const goToPreviousWeek = () => {
     const newDate = new Date(currentDate);
@@ -969,7 +1007,7 @@ const CalendarHub: React.FC = () => {
 
     switch (calendarMode) {
       case CalendarMode.DAY:
-        return <DayView events={localEvents} activeDayIndex={currentDate.getDay()} />;
+        return <DayView events={localEvents} activeDayIndex={currentDate.getDay()} currentDate={currentDate} onPreviousDay={goToPreviousDay} onNextDay={goToNextDay} />;
       case CalendarMode.WEEK:
         return <CalendarGrid events={localEvents} currentDate={currentDate} />;
       case CalendarMode.MONTH:
