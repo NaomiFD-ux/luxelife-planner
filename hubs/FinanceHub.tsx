@@ -1270,334 +1270,6 @@ const FinanceHub: React.FC = () => {
     );
   };
 
-  const TransactionsView = () => {
-    const [filter, setFilter] = useState<'all' | 'income' | 'expense'>('all');
-    const [searchTerm, setSearchTerm] = useState('');
-    const [showAddModal, setShowAddModal] = useState(false);
-    const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
-
-    // Extended mock transactions
-    const allTransactions: Transaction[] = [
-      ...transactions,
-      { id: 't4', date: '2024-10-20', description: 'Primary Job Salary', category: 'Income', amount: 5000, type: 'income' },
-      { id: 't5', date: '2024-10-18', description: 'Restaurant', category: 'Food', amount: -65.20, type: 'expense' },
-      { id: 't6', date: '2024-10-16', description: 'Netflix Subscription', category: 'Entertainment', amount: -15.99, type: 'expense' },
-      { id: 't7', date: '2024-10-15', description: 'Electric Bill', category: 'Utilities', amount: -120, type: 'expense' },
-      { id: 't8', date: '2024-10-12', description: 'Spotify Subscription', category: 'Entertainment', amount: -9.99, type: 'expense' },
-      { id: 't9', date: '2024-10-10', description: 'Internet Bill', category: 'Utilities', amount: -80, type: 'expense' },
-      { id: 't10', date: '2024-10-08', description: 'Freelance Project', category: 'Income', amount: 1500, type: 'income' },
-      { id: 't11', date: '2024-10-05', description: 'Car Insurance', category: 'Insurance', amount: -150, type: 'expense' },
-      { id: 't12', date: '2024-10-01', description: 'Rent Payment', category: 'Housing', amount: -1800, type: 'expense' },
-    ];
-
-    // Filter transactions
-    const filteredTransactions = allTransactions
-      .filter(t => {
-        if (filter === 'all') return true;
-        return t.type === filter;
-      })
-      .filter(t => {
-        if (!searchTerm) return true;
-        return t.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-               t.category.toLowerCase().includes(searchTerm.toLowerCase());
-      })
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-    // Calculate totals
-    const totalIncome = filteredTransactions
-      .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    const totalExpenses = Math.abs(filteredTransactions
-      .filter(t => t.type === 'expense')
-      .reduce((sum, t) => sum + t.amount, 0));
-
-    const netAmount = totalIncome - totalExpenses;
-
-    // Get category breakdown
-    const categoryTotals = filteredTransactions.reduce((acc, t) => {
-      if (!acc[t.category]) {
-        acc[t.category] = 0;
-      }
-      acc[t.category] += Math.abs(t.amount);
-      return acc;
-    }, {} as Record<string, number>);
-
-    const topCategories = Object.entries(categoryTotals)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
-
-    return (
-      <div className="flex flex-col gap-6 animate-in fade-in duration-700">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-          <div>
-            <h1 className="text-2xl font-black tracking-tight text-text-main dark:text-white">Transactions</h1>
-            <p className="text-text-muted mt-0.5 font-medium text-sm">View and manage all your transactions</p>
-          </div>
-
-          <div className="flex gap-3 w-full md:w-auto">
-            {/* Search */}
-            <div className="relative flex-1 md:w-64">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <span className="material-symbols-outlined text-text-muted text-[20px]">search</span>
-              </div>
-              <input
-                type="text"
-                placeholder="Search transactions..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="block w-full pl-10 pr-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-surface-dark text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/30 transition-all text-sm"
-              />
-            </div>
-            {/* Add Transaction Button */}
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold shadow-lg shadow-primary/30 transition-all text-sm whitespace-nowrap"
-            >
-              <span className="material-symbols-outlined text-[20px]">add</span>
-              Add
-            </button>
-          </div>
-        </div>
-
-        {/* Add/Edit Transaction Modal */}
-        {showAddModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-surface-dark rounded-2xl p-6 max-w-md w-full shadow-2xl">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-bold text-text-main dark:text-white">
-                  {editingTransaction ? 'Edit Transaction' : 'Add Transaction'}
-                </h3>
-                <button
-                  onClick={() => {
-                    setShowAddModal(false);
-                    setEditingTransaction(null);
-                  }}
-                  className="text-text-muted hover:text-text-main"
-                >
-                  <span className="material-symbols-outlined">close</span>
-                </button>
-              </div>
-
-              <form className="space-y-4">
-                <div>
-                  <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Type</label>
-                  <div className="flex gap-2">
-                    <button type="button" className="flex-1 py-2 rounded-lg bg-emerald-100 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 font-bold text-sm">
-                      Income
-                    </button>
-                    <button type="button" className="flex-1 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-text-muted font-bold text-sm">
-                      Expense
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Description</label>
-                  <input
-                    type="text"
-                    placeholder="e.g., Grocery Shopping"
-                    className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-background-dark text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Amount</label>
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted font-bold">$</span>
-                    <input
-                      type="number"
-                      placeholder="0.00"
-                      className="w-full pl-8 pr-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-background-dark text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 text-sm"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Category</label>
-                  <select className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-background-dark text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20 text-sm">
-                    <option>Food</option>
-                    <option>Transportation</option>
-                    <option>Entertainment</option>
-                    <option>Utilities</option>
-                    <option>Housing</option>
-                    <option>Income</option>
-                    <option>Other</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Date</label>
-                  <input
-                    type="date"
-                    className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-background-dark text-text-main focus:outline-none focus:ring-2 focus:ring-primary/20 text-sm"
-                  />
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAddModal(false);
-                      setEditingTransaction(null);
-                    }}
-                    className="flex-1 py-2.5 rounded-xl bg-gray-100 dark:bg-gray-800 text-text-main dark:text-white font-bold text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition-all"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 py-2.5 rounded-xl bg-primary text-white font-bold text-sm hover:bg-primary/90 shadow-lg shadow-primary/30 transition-all"
-                  >
-                    {editingTransaction ? 'Save Changes' : 'Add Transaction'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-gradient-to-br from-emerald-500 to-teal-500 text-white rounded-2xl p-5 shadow-lg">
-            <p className="text-xs font-bold uppercase tracking-wider opacity-90 mb-2">Total Income</p>
-            <p className="text-2xl font-black">${totalIncome.toLocaleString()}</p>
-          </div>
-          <div className="bg-gradient-to-br from-rose-500 to-pink-500 text-white rounded-2xl p-5 shadow-lg">
-            <p className="text-xs font-bold uppercase tracking-wider opacity-90 mb-2">Total Expenses</p>
-            <p className="text-2xl font-black">${totalExpenses.toLocaleString()}</p>
-          </div>
-          <div className={`bg-gradient-to-br ${netAmount >= 0 ? 'from-blue-500 to-cyan-500' : 'from-orange-500 to-red-500'} text-white rounded-2xl p-5 shadow-lg`}>
-            <p className="text-xs font-bold uppercase tracking-wider opacity-90 mb-2">Net Amount</p>
-            <p className="text-2xl font-black">{netAmount >= 0 ? '+' : '-'}${Math.abs(netAmount).toLocaleString()}</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Transactions List */}
-          <div className="lg:col-span-2 bg-white dark:bg-surface-dark rounded-2xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
-            {/* Filter Tabs */}
-            <div className="flex gap-2 mb-6 bg-background-light dark:bg-background-dark rounded-xl p-1">
-              <button
-                onClick={() => setFilter('all')}
-                className={`flex-1 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-                  filter === 'all' ? 'bg-primary text-white shadow-sm' : 'text-text-muted hover:text-text-main'
-                }`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setFilter('income')}
-                className={`flex-1 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-                  filter === 'income' ? 'bg-emerald-500 text-white shadow-sm' : 'text-text-muted hover:text-text-main'
-                }`}
-              >
-                Income
-              </button>
-              <button
-                onClick={() => setFilter('expense')}
-                className={`flex-1 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-                  filter === 'expense' ? 'bg-rose-500 text-white shadow-sm' : 'text-text-muted hover:text-text-main'
-                }`}
-              >
-                Expenses
-              </button>
-            </div>
-
-            {/* Transaction Items */}
-            <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2">
-              {filteredTransactions.length > 0 ? (
-                filteredTransactions.map(tx => (
-                  <div
-                    key={tx.id}
-                    className="flex items-center justify-between p-4 rounded-xl bg-background-light dark:bg-background-dark hover:bg-primary/5 transition-all cursor-pointer group"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className={`size-10 rounded-xl flex items-center justify-center ${
-                        tx.type === 'income' ? 'bg-emerald-100 dark:bg-emerald-950/30' : 'bg-rose-100 dark:bg-rose-950/30'
-                      }`}>
-                        <span className={`material-symbols-outlined text-[20px] ${
-                          tx.type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
-                        }`}>
-                          {tx.type === 'income' ? 'trending_up' : 'trending_down'}
-                        </span>
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold text-text-main dark:text-white">{tx.description}</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-xs text-text-muted">{new Date(tx.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-                          <span className="text-xs text-text-muted">•</span>
-                          <span className="text-xs font-medium text-text-muted">{tx.category}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className={`text-lg font-black ${
-                      tx.type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
-                    }`}>
-                      {tx.type === 'income' ? '+' : '-'}${Math.abs(tx.amount).toLocaleString()}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-12">
-                  <span className="material-symbols-outlined text-6xl text-text-muted/30 mb-4">receipt_long</span>
-                  <p className="text-text-muted">No transactions found</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Category Breakdown */}
-          <div className="bg-white dark:bg-surface-dark rounded-2xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
-            <h3 className="text-lg font-bold mb-4">Top Categories</h3>
-            <div className="space-y-3">
-              {topCategories.length > 0 ? (
-                topCategories.map(([category, amount], idx) => {
-                  const maxAmount = topCategories[0][1];
-                  const percentage = (amount / maxAmount) * 100;
-
-                  return (
-                    <div key={category}>
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-sm font-bold text-text-main dark:text-white">{category}</span>
-                        <span className="text-sm font-black text-primary">${amount.toLocaleString()}</span>
-                      </div>
-                      <div className="w-full h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary rounded-full transition-all"
-                          style={{ width: `${percentage}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="text-sm text-text-muted">No categories to display</p>
-              )}
-            </div>
-
-            {/* Quick Stats */}
-            <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-800 space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-medium text-text-muted">Total Transactions</span>
-                <span className="text-sm font-bold text-text-main dark:text-white">{filteredTransactions.length}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-medium text-text-muted">Avg Transaction</span>
-                <span className="text-sm font-bold text-text-main dark:text-white">
-                  ${filteredTransactions.length > 0
-                    ? Math.abs(filteredTransactions.reduce((sum, t) => sum + t.amount, 0) / filteredTransactions.length).toLocaleString(undefined, { maximumFractionDigits: 2 })
-                    : '0'}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const SavingsView = () => {
     // Savings Goal Modal State
     const [showSavingsModal, setShowSavingsModal] = useState(false);
@@ -1696,6 +1368,13 @@ const FinanceHub: React.FC = () => {
             <h1 className="text-2xl font-black tracking-tight text-text-main dark:text-white">Savings Goals</h1>
             <p className="text-text-muted mt-0.5 font-medium text-sm">Track and manage your savings goals</p>
           </div>
+          <button
+            onClick={handleAddSavingsGoal}
+            className="flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold shadow-lg shadow-primary/30 transition-all"
+          >
+            <span className="material-symbols-outlined">add</span>
+            Add New Goal
+          </button>
         </div>
 
         {/* Overall Summary */}
@@ -1810,16 +1489,6 @@ const FinanceHub: React.FC = () => {
           })}
         </div>
 
-        {/* Add New Goal Button */}
-        <div className="flex justify-center">
-          <button
-            onClick={handleAddSavingsGoal}
-            className="flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold shadow-lg shadow-primary/30 transition-all"
-          >
-            <span className="material-symbols-outlined">add</span>
-            Add New Savings Goal
-          </button>
-        </div>
 
         {/* Savings Goal Modal */}
         {showSavingsModal && (
@@ -2073,6 +1742,13 @@ const FinanceHub: React.FC = () => {
             <h1 className="text-2xl font-black tracking-tight text-text-main dark:text-white">Debt Management</h1>
             <p className="text-text-muted mt-0.5 font-medium text-sm">Track and manage your debt repayment</p>
           </div>
+          <button
+            onClick={handleAddDebt}
+            className="flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold shadow-lg shadow-primary/30 transition-all"
+          >
+            <span className="material-symbols-outlined">add</span>
+            Add New Debt
+          </button>
         </div>
 
         {/* Overall Summary */}
@@ -2223,16 +1899,6 @@ const FinanceHub: React.FC = () => {
           </div>
         </div>
 
-        {/* Add New Debt Button */}
-        <div className="flex justify-center">
-          <button
-            onClick={handleAddDebt}
-            className="flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold shadow-lg shadow-primary/30 transition-all"
-          >
-            <span className="material-symbols-outlined">add</span>
-            Add New Debt
-          </button>
-        </div>
 
         {/* Debt Modal */}
         {showDebtModal && (
@@ -4146,7 +3812,6 @@ const FinanceHub: React.FC = () => {
       case 'overview': return <OverviewView />;
       case 'dashboard': return <DashboardView />;
       case 'calendar': return <CalendarView />;
-      case 'tx': return <TransactionsView />;
       case 'savings': return <SavingsView />;
       case 'debt': return <DebtView />;
       case 'settings': return <SettingsView />;
