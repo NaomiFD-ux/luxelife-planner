@@ -1670,16 +1670,9 @@ const FinanceHub: React.FC = () => {
       setShowSavingsModal(false);
     };
 
-    // Extended mock savings goals
-    const allSavingsGoals: SavingsGoal[] = [
-      ...savingsGoals,
-      { id: 'sg3', name: 'New Car Down Payment', targetAmount: 15000, currentAmount: 8200, deadline: '2025-03-01' },
-      { id: 'sg4', name: 'House Renovation', targetAmount: 30000, currentAmount: 12500, deadline: '2025-09-15' },
-    ];
-
     // Calculate total savings
-    const totalSaved = allSavingsGoals.reduce((sum, goal) => sum + goal.currentAmount, 0);
-    const totalTarget = allSavingsGoals.reduce((sum, goal) => sum + goal.targetAmount, 0);
+    const totalSaved = savingsGoals.reduce((sum, goal) => sum + goal.currentAmount, 0);
+    const totalTarget = savingsGoals.reduce((sum, goal) => sum + goal.targetAmount, 0);
     const totalRemaining = totalTarget - totalSaved;
     const overallProgress = (totalSaved / totalTarget) * 100;
 
@@ -1727,7 +1720,7 @@ const FinanceHub: React.FC = () => {
 
         {/* Savings Goals Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {allSavingsGoals.map(goal => {
+          {savingsGoals.map(goal => {
             const progress = (goal.currentAmount / goal.targetAmount) * 100;
             const remaining = goal.targetAmount - goal.currentAmount;
             const status = getGoalStatus(goal);
@@ -2044,17 +2037,11 @@ const FinanceHub: React.FC = () => {
       setShowDebtModal(false);
     };
 
-    // Extended mock debts
-    const allDebts: Debt[] = [
-      ...debts,
-      { id: 'd3', name: 'Car Loan', totalAmount: 18000, remainingAmount: 12000, interestRate: 5.9, minimumPayment: 350, dueDate: 10 },
-    ];
-
     // Calculate totals
-    const totalDebt = allDebts.reduce((sum, debt) => sum + debt.totalAmount, 0);
-    const totalRemaining = allDebts.reduce((sum, debt) => sum + debt.remainingAmount, 0);
+    const totalDebt = debts.reduce((sum, debt) => sum + debt.totalAmount, 0);
+    const totalRemaining = debts.reduce((sum, debt) => sum + debt.remainingAmount, 0);
     const totalPaid = totalDebt - totalRemaining;
-    const totalMonthlyPayment = allDebts.reduce((sum, debt) => sum + debt.minimumPayment, 0);
+    const totalMonthlyPayment = debts.reduce((sum, debt) => sum + debt.minimumPayment, 0);
     const overallProgress = (totalPaid / totalDebt) * 100;
 
     // Helper: Calculate estimated months to payoff
@@ -2110,7 +2097,7 @@ const FinanceHub: React.FC = () => {
 
         {/* Debt Cards */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {allDebts.map(debt => {
+          {debts.map(debt => {
             const progress = ((debt.totalAmount - debt.remainingAmount) / debt.totalAmount) * 100;
             const monthsToPayoff = getMonthsToPayoff(debt);
             const totalInterest = getTotalInterest(debt);
@@ -2221,14 +2208,14 @@ const FinanceHub: React.FC = () => {
                   <p className="text-sm font-bold text-text-main dark:text-white mb-2">❄️ Avalanche Method</p>
                   <p className="text-xs text-text-muted">Focus on highest interest rate first. Saves most money on interest.</p>
                   <p className="text-xs font-bold text-primary mt-2">
-                    Target: {allDebts.sort((a, b) => b.interestRate - a.interestRate)[0]?.name} ({allDebts.sort((a, b) => b.interestRate - a.interestRate)[0]?.interestRate}% APR)
+                    Target: {debts.length > 0 ? [...debts].sort((a, b) => b.interestRate - a.interestRate)[0]?.name : 'N/A'} {debts.length > 0 && `(${[...debts].sort((a, b) => b.interestRate - a.interestRate)[0]?.interestRate}% APR)`}
                   </p>
                 </div>
                 <div className="bg-white dark:bg-surface-dark rounded-xl p-4 border border-gray-100 dark:border-gray-800">
                   <p className="text-sm font-bold text-text-main dark:text-white mb-2">⚡ Snowball Method</p>
                   <p className="text-xs text-text-muted">Pay off smallest balance first. Builds momentum and motivation.</p>
                   <p className="text-xs font-bold text-primary mt-2">
-                    Target: {allDebts.sort((a, b) => a.remainingAmount - b.remainingAmount)[0]?.name} (${allDebts.sort((a, b) => a.remainingAmount - b.remainingAmount)[0]?.remainingAmount.toLocaleString()})
+                    Target: {debts.length > 0 ? [...debts].sort((a, b) => a.remainingAmount - b.remainingAmount)[0]?.name : 'N/A'} {debts.length > 0 && `($${[...debts].sort((a, b) => a.remainingAmount - b.remainingAmount)[0]?.remainingAmount.toLocaleString()})`}
                   </p>
                 </div>
               </div>
