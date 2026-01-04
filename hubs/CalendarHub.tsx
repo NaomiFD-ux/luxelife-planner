@@ -1,7 +1,6 @@
 
 import React, { useState } from 'react';
 import { useEvents } from '../contexts/EventsContext';
-import GoogleCalendarSync from '../components/GoogleCalendarSync';
 
 // ===== TYPES =====
 enum CalendarMode {
@@ -671,9 +670,6 @@ const RightSidebar: React.FC = () => {
           })}
         </div>
       </div>
-
-      {/* Google Calendar Sync */}
-      <GoogleCalendarSync />
 
       {/* Categories Widget */}
       <div>

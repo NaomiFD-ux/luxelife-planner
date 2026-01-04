@@ -3,17 +3,43 @@ import React, { useState } from 'react';
 import { useApp } from '../DashboardApp';
 import { HUB_CONFIGS } from '../constants';
 import { HubType } from '../types';
+import { useSyncSettings } from '../contexts/SyncSettingsContext';
+import { useGoogleCalendar } from '../contexts/GoogleCalendarContext';
+import GoogleCalendarSync from './GoogleCalendarSync';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-type SettingsTab = 'hubs' | 'general' | 'account' | 'notifications' | 'appearance';
+type SettingsTab = 'hubs' | 'general' | 'account' | 'notifications' | 'appearance' | 'integrations';
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const { user, isDark, setIsDark, enabledHubs, setEnabledHubs } = useApp();
   const [activeTab, setActiveTab] = useState<SettingsTab>('hubs');
+  const { settings, updateSettings } = useSyncSettings();
+  const { isConnected, userEmail, disconnectGoogleCalendar } = useGoogleCalendar();
+
+  const formatLastSync = (lastSyncTime: string | null): string => {
+    if (!lastSyncTime) return 'Never synced';
+
+    const syncDate = new Date(lastSyncTime);
+    const now = new Date();
+    const diff = now.getTime() - syncDate.getTime();
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+    if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+
+    return syncDate.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  };
 
   if (!isOpen) return null;
 
@@ -32,7 +58,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
     { id: 'general' as SettingsTab, label: 'General', icon: 'tune' },
     { id: 'account' as SettingsTab, label: 'Account', icon: 'person' },
     { id: 'notifications' as SettingsTab, label: 'Notifications', icon: 'notifications' },
-    { id: 'appearance' as SettingsTab, label: 'Appearance', icon: 'palette' }
+    { id: 'appearance' as SettingsTab, label: 'Appearance', icon: 'palette' },
+    { id: 'integrations' as SettingsTab, label: 'Integrations', icon: 'sync' }
   ];
 
   return (
@@ -398,6 +425,171 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {activeTab === 'integrations' && (
+              <div className="space-y-6">
+                <div>
+                  <h4 className="text-lg font-black text-text-main dark:text-white mb-1">Integrations</h4>
+                  <p className="text-sm text-text-muted">Connect and sync with external services</p>
+                </div>
+
+                {/* Enable Auto-Sync Toggle */}
+                <div className="bg-background-light dark:bg-background-dark rounded-2xl p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <h5 className="text-sm font-bold text-text-main dark:text-white mb-1">Enable Google Calendar Auto-Sync</h5>
+                      <p className="text-xs text-text-muted">Automatically sync events between LuxeLife and Google Calendar</p>
+                    </div>
+                    <button
+                      onClick={() => updateSettings({ autoSyncEnabled: !settings.autoSyncEnabled })}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        settings.autoSyncEnabled ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          settings.autoSyncEnabled ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Google Calendar Section (visible when enabled) */}
+                {settings.autoSyncEnabled && (
+                  <div className="space-y-6">
+                    {/* Connection Card */}
+                    {!isConnected ? (
+                      <div className="bg-background-light dark:bg-background-dark rounded-2xl p-6">
+                        <div className="mb-4">
+                          <h5 className="text-sm font-bold text-text-main dark:text-white mb-1">Connect Google Calendar</h5>
+                          <p className="text-xs text-text-muted">Sign in with your Google account to enable automatic syncing</p>
+                        </div>
+                        <GoogleCalendarSync />
+                      </div>
+                    ) : (
+                      <>
+                        {/* Connected Status */}
+                        <div className="bg-background-light dark:bg-background-dark rounded-2xl p-6">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              <div className="size-10 rounded-lg bg-green-100 dark:bg-green-900/20 flex items-center justify-center">
+                                <span className="material-symbols-outlined text-green-600 dark:text-green-400">check_circle</span>
+                              </div>
+                              <div>
+                                <h5 className="text-sm font-bold text-text-main dark:text-white">Connected to Google Calendar</h5>
+                                <p className="text-xs text-text-muted">{userEmail}</p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={disconnectGoogleCalendar}
+                              className="px-4 py-2 text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-lg transition-all"
+                            >
+                              Disconnect
+                            </button>
+                          </div>
+
+                          {/* Sync Status */}
+                          <div className="flex items-center gap-2 p-3 bg-white dark:bg-surface-dark rounded-xl">
+                            {settings.syncStatus === 'syncing' ? (
+                              <>
+                                <div className="animate-spin size-4 border-2 border-primary border-t-transparent rounded-full"></div>
+                                <span className="text-xs text-text-muted font-bold">Syncing...</span>
+                              </>
+                            ) : settings.syncStatus === 'error' ? (
+                              <>
+                                <span className="material-symbols-outlined text-red-500 text-sm">error</span>
+                                <span className="text-xs text-red-600 dark:text-red-400 font-bold">Sync failed</span>
+                              </>
+                            ) : settings.lastSyncTime ? (
+                              <>
+                                <span className="material-symbols-outlined text-green-500 text-sm">check_circle</span>
+                                <span className="text-xs text-text-muted font-bold">Last synced: {formatLastSync(settings.lastSyncTime)}</span>
+                              </>
+                            ) : (
+                              <span className="text-xs text-text-muted font-bold">Ready to sync</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Sync Direction Settings */}
+                        <div className="bg-background-light dark:bg-background-dark rounded-2xl p-6 space-y-4">
+                          <div>
+                            <h5 className="text-sm font-bold text-text-main dark:text-white mb-1">Sync Directions</h5>
+                            <p className="text-xs text-text-muted">Choose which directions to sync events</p>
+                          </div>
+
+                          {/* Sync TO Google Toggle */}
+                          <div className="flex items-center justify-between p-4 bg-white dark:bg-surface-dark rounded-xl">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="material-symbols-outlined text-primary text-lg">cloud_upload</span>
+                                <h6 className="text-sm font-bold text-text-main dark:text-white">Sync TO Google Calendar</h6>
+                              </div>
+                              <p className="text-xs text-text-muted">LuxeLife events → Google Calendar → Your phone</p>
+                            </div>
+                            <button
+                              onClick={() => updateSettings({ syncToGoogle: !settings.syncToGoogle })}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                settings.syncToGoogle ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                  settings.syncToGoogle ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                          </div>
+
+                          {/* Sync FROM Google Toggle */}
+                          <div className="flex items-center justify-between p-4 bg-white dark:bg-surface-dark rounded-xl">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="material-symbols-outlined text-purple-600 dark:text-purple-400 text-lg">cloud_download</span>
+                                <h6 className="text-sm font-bold text-text-main dark:text-white">Sync FROM Google Calendar</h6>
+                              </div>
+                              <p className="text-xs text-text-muted">Google Calendar → LuxeLife (every 5 minutes)</p>
+                            </div>
+                            <button
+                              onClick={() => updateSettings({ syncFromGoogle: !settings.syncFromGoogle })}
+                              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                settings.syncFromGoogle ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                  settings.syncFromGoogle ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Error Display */}
+                        {settings.syncError && (
+                          <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
+                            <div className="flex items-start gap-3">
+                              <span className="material-symbols-outlined text-red-600 dark:text-red-400">error</span>
+                              <div className="flex-1">
+                                <h5 className="text-sm font-bold text-red-900 dark:text-red-100 mb-1">Sync Error</h5>
+                                <p className="text-xs text-red-700 dark:text-red-300">{settings.syncError}</p>
+                              </div>
+                              <button
+                                onClick={() => updateSettings({ syncError: null })}
+                                className="text-red-600 dark:text-red-400"
+                              >
+                                <span className="material-symbols-outlined text-sm">close</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

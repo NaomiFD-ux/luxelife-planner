@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
 import { useEvents } from './EventsContext';
+import { useSyncSettings } from './SyncSettingsContext';
 
 declare global {
   interface Window {
@@ -27,10 +28,16 @@ const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/
 
 export const GoogleCalendarProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { events, addEvent, updateEvent } = useEvents();
+  const { settings, updateSettings } = useSyncSettings();
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [tokenClient, setTokenClient] = useState<any>(null);
+
+  // Auto-sync state
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const DEBOUNCE_DELAY = 2000; // 2 seconds
 
   // Initialize Google API client
   useEffect(() => {
@@ -174,6 +181,8 @@ export const GoogleCalendarProvider: React.FC<{ children: ReactNode }> = ({ chil
   const syncToGoogleCalendar = async () => {
     if (!isConnected) return;
 
+    updateSettings({ syncStatus: 'syncing', syncError: null });
+
     try {
       // Color mapping: LuxeLife source → Google Calendar color ID
       const colorMap: Record<string, string> = {
@@ -214,15 +223,63 @@ export const GoogleCalendarProvider: React.FC<{ children: ReactNode }> = ({ chil
           },
         };
 
-        await window.gapi.client.calendar.events.insert({
-          calendarId: 'primary',
-          resource: googleEvent,
-        });
+        // Check if event already exists in Google Calendar (duplicate detection)
+        try {
+          const existingEvents = await window.gapi.client.calendar.events.list({
+            calendarId: 'primary',
+            privateExtendedProperty: `luxelife_id=${event.id}`,
+            maxResults: 1,
+          });
+
+          if (existingEvents.result.items && existingEvents.result.items.length > 0) {
+            // Event exists, update it instead
+            const existingEvent = existingEvents.result.items[0];
+            await window.gapi.client.calendar.events.update({
+              calendarId: 'primary',
+              eventId: existingEvent.id,
+              resource: googleEvent,
+            });
+          } else {
+            // Event doesn't exist, create it
+            await window.gapi.client.calendar.events.insert({
+              calendarId: 'primary',
+              resource: googleEvent,
+            });
+          }
+        } catch (err) {
+          // If duplicate check fails, just try to insert
+          await window.gapi.client.calendar.events.insert({
+            calendarId: 'primary',
+            resource: googleEvent,
+          });
+        }
       }
 
       console.log('✅ Synced to Google Calendar successfully!');
-    } catch (error) {
+      updateSettings({
+        syncStatus: 'idle',
+        lastSyncTime: new Date().toISOString(),
+        syncError: null,
+      });
+    } catch (error: any) {
       console.error('Error syncing to Google Calendar:', error);
+
+      let errorMessage = 'Sync failed. Please try again.';
+      if (error.status === 401) {
+        errorMessage = 'Authentication expired. Please reconnect your Google Calendar.';
+        setIsConnected(false);
+        localStorage.removeItem('google_calendar_token');
+      } else if (error.status === 403) {
+        errorMessage = 'Permission denied. Please check your Google Calendar API settings.';
+      } else if (error.status === 429) {
+        errorMessage = 'Too many requests. Please wait a moment and try again.';
+      }
+
+      updateSettings({
+        syncStatus: 'error',
+        syncError: errorMessage,
+      });
+
       throw error;
     }
   };
@@ -230,6 +287,8 @@ export const GoogleCalendarProvider: React.FC<{ children: ReactNode }> = ({ chil
   // Sync Google Calendar events TO LuxeLife
   const syncFromGoogleCalendar = async () => {
     if (!isConnected) return;
+
+    updateSettings({ syncStatus: 'syncing', syncError: null });
 
     try {
       const response = await window.gapi.client.calendar.events.list({
@@ -245,6 +304,10 @@ export const GoogleCalendarProvider: React.FC<{ children: ReactNode }> = ({ chil
       for (const gEvent of googleEvents) {
         // Skip events that were created by LuxeLife
         if (gEvent.extendedProperties?.private?.luxelife_id) continue;
+
+        // Check if event already exists in LuxeLife (avoid duplicates)
+        const existingEvent = events.find(e => e.sourceId === `google-${gEvent.id}`);
+        if (existingEvent) continue;
 
         // Convert Google Calendar event to LuxeLife event
         const startDate = gEvent.start?.date || gEvent.start?.dateTime?.split('T')[0];
@@ -276,11 +339,100 @@ export const GoogleCalendarProvider: React.FC<{ children: ReactNode }> = ({ chil
       }
 
       console.log('✅ Synced from Google Calendar successfully!');
-    } catch (error) {
+      updateSettings({
+        syncStatus: 'idle',
+        lastSyncTime: new Date().toISOString(),
+        syncError: null,
+      });
+    } catch (error: any) {
       console.error('Error syncing from Google Calendar:', error);
+
+      let errorMessage = 'Sync failed. Please try again.';
+      if (error.status === 401) {
+        errorMessage = 'Authentication expired. Please reconnect your Google Calendar.';
+        setIsConnected(false);
+        localStorage.removeItem('google_calendar_token');
+      } else if (error.status === 403) {
+        errorMessage = 'Permission denied. Please check your Google Calendar API settings.';
+      } else if (error.status === 429) {
+        errorMessage = 'Too many requests. Please wait a moment and try again.';
+      }
+
+      updateSettings({
+        syncStatus: 'error',
+        syncError: errorMessage,
+      });
+
       throw error;
     }
   };
+
+  // Auto-sync TO Google (debounced - watches for event changes)
+  useEffect(() => {
+    if (!settings.autoSyncEnabled || !isConnected || !settings.syncToGoogle) {
+      // Clear any pending sync
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+        syncTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    // Debounce sync: wait 2 seconds after last event change
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+    }
+
+    syncTimeoutRef.current = setTimeout(async () => {
+      console.log('🔄 Auto-syncing TO Google Calendar...');
+      try {
+        await syncToGoogleCalendar();
+      } catch (error) {
+        console.error('Auto-sync TO Google failed:', error);
+      }
+    }, DEBOUNCE_DELAY);
+
+    return () => {
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+      }
+    };
+  }, [events, settings.autoSyncEnabled, isConnected, settings.syncToGoogle]);
+
+  // Auto-sync FROM Google (interval-based - every 5 minutes)
+  useEffect(() => {
+    if (!settings.autoSyncEnabled || !isConnected || !settings.syncFromGoogle) {
+      // Clear interval if it exists
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = null;
+      }
+      return;
+    }
+
+    // Initial sync when enabled
+    console.log('🔄 Initial sync FROM Google Calendar...');
+    syncFromGoogleCalendar().catch((error) => {
+      console.error('Initial sync FROM Google failed:', error);
+    });
+
+    // Set up interval for periodic syncing
+    syncIntervalRef.current = setInterval(async () => {
+      console.log('🔄 Auto-syncing FROM Google Calendar...');
+      try {
+        await syncFromGoogleCalendar();
+      } catch (error) {
+        console.error('Auto-sync FROM Google failed:', error);
+      }
+    }, settings.syncInterval);
+
+    return () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = null;
+      }
+    };
+  }, [settings.autoSyncEnabled, isConnected, settings.syncFromGoogle, settings.syncInterval]);
 
   return (
     <GoogleCalendarContext.Provider
