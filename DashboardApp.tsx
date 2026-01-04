@@ -6,6 +6,7 @@ import { HUB_CONFIGS } from './constants';
 import TopBar from './components/TopBar';
 import Sidebar from './components/Sidebar';
 import { EventsProvider } from './contexts/EventsContext';
+import { GoogleCalendarProvider } from './contexts/GoogleCalendarContext';
 
 // Context for global state
 interface DashboardAppContextType {
@@ -132,11 +133,13 @@ const DashboardApp: React.FC = () => {
 
   return (
     <EventsProvider>
-      <DashboardAppContext.Provider value={{ activeHub, setActiveHub, user, isDark, setIsDark, enabledHubs, setEnabledHubs }}>
-        <MainLayout>
-          {renderHub()}
-        </MainLayout>
-      </DashboardAppContext.Provider>
+      <GoogleCalendarProvider>
+        <DashboardAppContext.Provider value={{ activeHub, setActiveHub, user, isDark, setIsDark, enabledHubs, setEnabledHubs }}>
+          <MainLayout>
+            {renderHub()}
+          </MainLayout>
+        </DashboardAppContext.Provider>
+      </GoogleCalendarProvider>
     </EventsProvider>
   );
 };
