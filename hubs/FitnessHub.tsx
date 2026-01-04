@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useEvents } from '../contexts/EventsContext';
 
 type FitnessSubView = 'overview' | 'workouts' | 'nutrition' | 'measurements' | 'settings';
 type WorkoutLocation = 'gym' | 'home' | 'outside';
@@ -78,6 +79,7 @@ interface NutritionLog {
 }
 
 const FitnessHub: React.FC = () => {
+  const { addEvent, deleteEventsBySource, events } = useEvents();
   const [currentView, setCurrentView] = useState<FitnessSubView>('overview');
 
   useEffect(() => {
@@ -288,6 +290,34 @@ const FitnessHub: React.FC = () => {
   ]);
 
   const [scheduledWorkouts, setScheduledWorkouts] = useState<ScheduledWorkout[]>([]);
+
+  // Sync workouts to EventsContext
+  useEffect(() => {
+    // Remove all existing fitness events
+    const fitnessEvents = events.filter(e => e.source === 'fitness');
+    fitnessEvents.forEach(e => deleteEventsBySource(e.sourceId));
+
+    // Add scheduled workouts as events
+    scheduledWorkouts.forEach(workout => {
+      const routine = routines.find(r => r.id === workout.routineId);
+      const template = workoutTemplates.find(t => t.id === workout.templateId);
+      if (!routine || !template) return;
+
+      addEvent({
+        title: template.name,
+        startDate: workout.date,
+        startTime: routine.time,
+        category: 'Fitness',
+        description: template.description,
+        source: 'fitness',
+        sourceId: workout.id,
+        colorClass: 'text-pink-600',
+        bgClass: 'bg-pink-100',
+        location: template.location,
+        allDay: false,
+      });
+    });
+  }, [scheduledWorkouts, routines, workoutTemplates]);
 
   // ============== MEASUREMENTS STATE ==============
   const [progressPhotos, setProgressPhotos] = useState<ProgressPhoto[]>([

@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { useEvents } from '../contexts/EventsContext';
 
 type JobSubView = 'dashboard' | 'profile' | 'documents' | 'ai-assistant' | 'applications' | 'settings';
 type JobStage = 'Applied' | 'Screening' | '1st Interview' | '2nd Interview' | 'Final Interview' | 'Offer' | 'Accepted' | 'Rejected';
@@ -73,10 +74,31 @@ interface VaultDoc {
 }
 
 const JobTracker: React.FC = () => {
+  const { addEvent, deleteEventsBySource, events } = useEvents();
   const [currentView, setCurrentView] = useState<JobSubView>('dashboard');
   const [selectedJob, setSelectedJob] = useState<JobApplication | null>(null);
   const [activeDocTab, setActiveDocTab] = useState<DocTab>('resumes');
   const [activeAppTab, setActiveAppTab] = useState<AppDetailTab>('interview');
+
+  // New Application modal state
+  const [showNewApplicationModal, setShowNewApplicationModal] = useState(false);
+  const [newAppForm, setNewAppForm] = useState({
+    company: '',
+    role: '',
+    salary: '',
+    locationType: 'Remote' as 'Remote' | 'Hybrid' | 'Onsite',
+    description: '',
+    jobPostingUrl: ''
+  });
+
+  // Interview Date/Time modal state
+  const [showInterviewDateModal, setShowInterviewDateModal] = useState(false);
+  const [interviewDateForm, setInterviewDateForm] = useState({
+    date: '',
+    time: '',
+    jobId: '',
+    targetStage: '' as JobStage
+  });
 
   // Documents state
   const [resumes, setResumes] = useState<ResumeDoc[]>([
@@ -250,6 +272,20 @@ const JobTracker: React.FC = () => {
 
   // Stage management handlers
   const moveToStage = (jobId: string, newStage: JobStage) => {
+    // Check if moving to an interview stage - if so, open date picker
+    const interviewStages: JobStage[] = ['Screening', '1st Interview', '2nd Interview', 'Final Interview'];
+    if (interviewStages.includes(newStage)) {
+      setInterviewDateForm({
+        date: new Date().toISOString().split('T')[0],
+        time: '09:00',
+        jobId,
+        targetStage: newStage
+      });
+      setShowInterviewDateModal(true);
+      return;
+    }
+
+    // For non-interview stages, move directly
     setApplications(prev => prev.map(app => {
       if (app.id !== jobId) return app;
 
@@ -274,6 +310,76 @@ const JobTracker: React.FC = () => {
         setSelectedJob({...updatedJob, stage: newStage});
       }
     }
+  };
+
+  // Handle interview date submission
+  const handleInterviewDateSubmit = () => {
+    const { jobId, targetStage, date, time } = interviewDateForm;
+
+    setApplications(prev => prev.map(app => {
+      if (app.id !== jobId) return app;
+
+      const stageIndex = STAGE_ORDER.indexOf(targetStage);
+      const formattedDate = new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+      const updatedTimeline = app.timeline.map((item, idx) => ({
+        ...item,
+        completed: idx < stageIndex,
+        date: idx === stageIndex ? `${formattedDate} @ ${time}` : item.date
+      }));
+
+      return {
+        ...app,
+        stage: targetStage,
+        timeline: updatedTimeline
+      };
+    }));
+
+    // Update selected job if it's the one being modified
+    if (selectedJob?.id === jobId) {
+      const updatedJob = applications.find(app => app.id === jobId);
+      if (updatedJob) {
+        setSelectedJob({...updatedJob, stage: targetStage});
+      }
+    }
+
+    setShowInterviewDateModal(false);
+  };
+
+  // Handle new application submission
+  const handleNewApplicationSubmit = () => {
+    if (!newAppForm.company.trim() || !newAppForm.role.trim()) return;
+
+    const newApp: JobApplication = {
+      id: `app-${Date.now()}`,
+      company: newAppForm.company,
+      role: newAppForm.role,
+      salary: newAppForm.salary || 'Not specified',
+      locationType: newAppForm.locationType,
+      stage: 'Applied',
+      dateApplied: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      logo: `https://ui-avatars.com/api/?name=${encodeURIComponent(newAppForm.company)}&background=random`,
+      description: newAppForm.description,
+      jobPostingUrl: newAppForm.jobPostingUrl,
+      timeline: STAGE_ORDER.map((stage, idx) => ({
+        stage,
+        label: stage,
+        completed: idx === 0,
+        date: idx === 0 ? new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : undefined
+      })),
+      prepData: {}
+    };
+
+    setApplications(prev => [...prev, newApp]);
+    setNewAppForm({
+      company: '',
+      role: '',
+      salary: '',
+      locationType: 'Remote',
+      description: '',
+      jobPostingUrl: ''
+    });
+    setShowNewApplicationModal(false);
   };
 
   const updatePrepData = (jobId: string, stage: JobStage, prepData: Partial<InterviewPrep>) => {
@@ -415,6 +521,44 @@ const JobTracker: React.FC = () => {
       prepData: {}
     }
   ]);
+
+  // Sync job interviews to EventsContext
+  useEffect(() => {
+    // Remove all existing job events
+    const jobEvents = events.filter(e => e.source === 'jobs');
+    jobEvents.forEach(e => deleteEventsBySource(e.sourceId));
+
+    // Add interview events from applications
+    const interviewStages: JobStage[] = ['Screening', '1st Interview', '2nd Interview', 'Final Interview'];
+    applications.forEach(app => {
+      app.timeline.forEach(timelineItem => {
+        // Only create events for interview stages that have dates
+        if (interviewStages.includes(timelineItem.stage) && timelineItem.date) {
+          // Parse date - format is "Oct 25" or "Oct 25, 2023"
+          const currentYear = new Date().getFullYear();
+          const dateStr = timelineItem.date.includes(',')
+            ? timelineItem.date
+            : `${timelineItem.date}, ${currentYear}`;
+          const parsedDate = new Date(dateStr);
+          const formattedDate = parsedDate.toISOString().split('T')[0];
+
+          addEvent({
+            title: `${timelineItem.stage} - ${app.company}`,
+            startDate: formattedDate,
+            startTime: '09:00', // Default to 9 AM if not specified
+            category: 'Work',
+            description: `${app.role} at ${app.company}`,
+            source: 'jobs',
+            sourceId: `${app.id}-${timelineItem.stage}`,
+            colorClass: 'text-purple-600',
+            bgClass: 'bg-purple-100',
+            location: app.locationType,
+            allDay: false,
+          });
+        }
+      });
+    });
+  }, [applications]);
 
   const DashboardView = () => {
     // Calculate stats from applications
@@ -1621,7 +1765,10 @@ const JobTracker: React.FC = () => {
             <h2 className="text-3xl font-black tracking-tight tracking-tight text-text-main dark:text-white">Active Applications</h2>
             <p className="text-text-muted mt-2 font-medium">Manage your professional pipeline in high-definition.</p>
           </div>
-          <button className="bg-primary text-white px-8 py-3 rounded-2xl font-bold shadow-lg shadow-primary/20 flex items-center gap-2 hover:scale-[1.02] transition-all">
+          <button
+            onClick={() => setShowNewApplicationModal(true)}
+            className="bg-primary text-white px-8 py-3 rounded-2xl font-bold shadow-lg shadow-primary/20 flex items-center gap-2 hover:scale-[1.02] transition-all"
+          >
              <span className="material-symbols-outlined">add</span> Add New Application
           </button>
         </div>
@@ -1934,6 +2081,130 @@ const JobTracker: React.FC = () => {
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowVaultModal(false)} className="flex-1 px-4 py-3 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">Cancel</button>
               <button onClick={handleCreateVaultDoc} className="flex-1 px-4 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-colors">Add Document</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Interview Date/Time Modal */}
+      {showInterviewDateModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-md w-full p-8">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-black">Schedule Interview</h3>
+              <button onClick={() => setShowInterviewDateModal(false)} className="size-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark flex items-center justify-center">
+                <span className="material-symbols-outlined text-sm">close</span>
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Interview Date</label>
+                <input
+                  type="date"
+                  value={interviewDateForm.date}
+                  onChange={(e) => setInterviewDateForm({...interviewDateForm, date: e.target.value})}
+                  className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Interview Time</label>
+                <input
+                  type="time"
+                  value={interviewDateForm.time}
+                  onChange={(e) => setInterviewDateForm({...interviewDateForm, time: e.target.value})}
+                  className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowInterviewDateModal(false)} className="flex-1 px-4 py-3 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+              <button onClick={handleInterviewDateSubmit} className="flex-1 px-4 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-colors">
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Application Modal */}
+      {showNewApplicationModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-md w-full p-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-black">Add New Application</h3>
+              <button onClick={() => setShowNewApplicationModal(false)} className="size-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark flex items-center justify-center">
+                <span className="material-symbols-outlined text-sm">close</span>
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Company Name*</label>
+                <input
+                  type="text"
+                  value={newAppForm.company}
+                  onChange={(e) => setNewAppForm({...newAppForm, company: e.target.value})}
+                  placeholder="e.g., Stripe"
+                  className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Job Role*</label>
+                <input
+                  type="text"
+                  value={newAppForm.role}
+                  onChange={(e) => setNewAppForm({...newAppForm, role: e.target.value})}
+                  placeholder="e.g., Senior Product Designer"
+                  className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Salary Range</label>
+                <input
+                  type="text"
+                  value={newAppForm.salary}
+                  onChange={(e) => setNewAppForm({...newAppForm, salary: e.target.value})}
+                  placeholder="e.g., $120k - $150k"
+                  className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Location Type</label>
+                <select
+                  value={newAppForm.locationType}
+                  onChange={(e) => setNewAppForm({...newAppForm, locationType: e.target.value as 'Remote' | 'Hybrid' | 'On-site'})}
+                  className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="Remote">Remote</option>
+                  <option value="Hybrid">Hybrid</option>
+                  <option value="On-site">On-site</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Job URL</label>
+                <input
+                  type="url"
+                  value={newAppForm.jobUrl}
+                  onChange={(e) => setNewAppForm({...newAppForm, jobUrl: e.target.value})}
+                  placeholder="https://..."
+                  className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Description/Notes</label>
+                <textarea
+                  value={newAppForm.description}
+                  onChange={(e) => setNewAppForm({...newAppForm, description: e.target.value})}
+                  placeholder="Add any notes about the position..."
+                  rows={3}
+                  className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-primary/20 resize-none"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowNewApplicationModal(false)} className="flex-1 px-4 py-3 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+              <button onClick={handleNewApplicationSubmit} className="flex-1 px-4 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-colors">
+                Add Application
+              </button>
             </div>
           </div>
         </div>

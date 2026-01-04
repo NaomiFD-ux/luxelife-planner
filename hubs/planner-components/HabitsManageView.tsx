@@ -81,82 +81,6 @@ const HabitsManageView: React.FC<HabitsManageViewProps> = ({ habits, categories,
           </button>
         </div>
 
-        {/* Add Habit Form */}
-        {showHabitForm && (
-          <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-lg mb-6 animate-in fade-in slide-in-from-top-4 duration-300">
-            <h3 className="text-lg font-black text-text-main dark:text-white mb-4">Create New Habit</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold text-text-muted dark:text-gray-400 uppercase tracking-wider mb-2">Habit Name</label>
-                <input 
-                  value={newHabitName}
-                  onChange={(e) => setNewHabitName(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleCreateHabit()}
-                  placeholder="e.g., Morning Meditation, Drink Water..."
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-background-dark text-text-main dark:text-white text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none placeholder:text-gray-400"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-text-muted dark:text-gray-400 uppercase tracking-wider mb-2">Goal</label>
-                <input 
-                  type="number"
-                  min="1"
-                  value={newHabitGoal}
-                  onChange={(e) => setNewHabitGoal(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-background-dark text-text-main dark:text-white text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-text-muted dark:text-gray-400 uppercase tracking-wider mb-2">Unit</label>
-                <input 
-                  value={newHabitUnit}
-                  onChange={(e) => setNewHabitUnit(e.target.value)}
-                  placeholder="e.g., times, L, mins..."
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-background-dark text-text-main dark:text-white text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none placeholder:text-gray-400"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold text-text-muted dark:text-gray-400 uppercase tracking-wider mb-2">Frequency</label>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setHabitFrequency('daily')}
-                    className={`flex-1 px-4 py-3 rounded-xl text-sm font-bold border transition-all ${
-                      habitFrequency === 'daily'
-                        ? 'bg-primary text-white border-primary shadow-lg shadow-primary/20'
-                        : 'bg-white dark:bg-background-dark text-text-muted dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-primary'
-                    }`}
-                  >
-                    Daily
-                  </button>
-                  <button
-                    onClick={() => setHabitFrequency('weekly')}
-                    className={`flex-1 px-4 py-3 rounded-xl text-sm font-bold border transition-all ${
-                      habitFrequency === 'weekly'
-                        ? 'bg-primary text-white border-primary shadow-lg shadow-primary/20'
-                        : 'bg-white dark:bg-background-dark text-text-muted dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-primary'
-                    }`}
-                  >
-                    Weekly
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-4">
-              <button
-                onClick={() => setShowHabitForm(false)}
-                className="flex-1 px-4 py-3 rounded-xl text-sm font-bold text-text-muted dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:bg-background-light dark:hover:bg-background-dark transition-all"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={handleCreateHabit}
-                className="flex-[2] px-4 py-3 rounded-xl text-sm font-bold bg-primary text-white shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all active:scale-95"
-              >
-                Create Habit
-              </button>
-            </div>
-          </div>
-        )}
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {habits.length > 0 ? habits.map(h => (
@@ -198,39 +122,6 @@ const HabitsManageView: React.FC<HabitsManageViewProps> = ({ habits, categories,
           </button>
         </div>
 
-        {/* Add Category Form */}
-        {showCategoryForm && (
-          <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-lg mb-6 animate-in fade-in slide-in-from-top-4 duration-300">
-            <h3 className="text-lg font-black text-text-main dark:text-white mb-4">Create New Category</h3>
-            <div className="flex flex-col gap-4">
-              <div>
-                <label className="block text-xs font-bold text-text-muted dark:text-gray-400 uppercase tracking-wider mb-2">Category Name</label>
-                <input 
-                  value={newCatName}
-                  onChange={(e) => setNewCatName(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleCreateCategory()}
-                  placeholder="e.g., Work, Personal, Health..."
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-background-dark text-text-main dark:text-white text-sm focus:ring-2 focus:ring-primary focus:border-transparent outline-none placeholder:text-gray-400"
-                />
-              </div>
-              <p className="text-xs text-text-muted dark:text-gray-400 italic">A random color will be assigned to your category</p>
-            </div>
-            <div className="flex gap-3 mt-4">
-              <button
-                onClick={() => setShowCategoryForm(false)}
-                className="flex-1 px-4 py-3 rounded-xl text-sm font-bold text-text-muted dark:text-gray-400 border border-gray-200 dark:border-gray-700 hover:bg-background-light dark:hover:bg-background-dark transition-all"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={handleCreateCategory}
-                className="flex-[2] px-4 py-3 rounded-xl text-sm font-bold bg-slate-800 dark:bg-gray-700 text-white shadow-lg hover:shadow-xl transition-all active:scale-95"
-              >
-                Create Category
-              </button>
-            </div>
-          </div>
-        )}
 
         <div className="flex flex-wrap gap-4">
           {categories.length > 0 ? categories.map(c => (
@@ -246,6 +137,117 @@ const HabitsManageView: React.FC<HabitsManageViewProps> = ({ habits, categories,
           )}
         </div>
       </section>
+
+      {/* Add Habit Modal */}
+      {showHabitForm && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-md w-full p-8">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-black">Create New Habit</h3>
+              <button onClick={() => setShowHabitForm(false)} className="size-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark flex items-center justify-center">
+                <span className="material-symbols-outlined text-sm">close</span>
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Habit Name</label>
+                <input
+                  value={newHabitName}
+                  onChange={(e) => setNewHabitName(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleCreateHabit()}
+                  placeholder="e.g., Morning Meditation, Drink Water..."
+                  className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Goal</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={newHabitGoal}
+                    onChange={(e) => setNewHabitGoal(e.target.value)}
+                    className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Unit</label>
+                  <input
+                    value={newHabitUnit}
+                    onChange={(e) => setNewHabitUnit(e.target.value)}
+                    placeholder="times, L, mins..."
+                    className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Frequency</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setHabitFrequency('daily')}
+                    className={`px-4 py-3 rounded-xl text-sm font-bold transition-all ${
+                      habitFrequency === 'daily'
+                        ? 'bg-primary text-white'
+                        : 'bg-background-light dark:bg-background-dark text-text-muted hover:bg-primary/10'
+                    }`}
+                  >
+                    Daily
+                  </button>
+                  <button
+                    onClick={() => setHabitFrequency('weekly')}
+                    className={`px-4 py-3 rounded-xl text-sm font-bold transition-all ${
+                      habitFrequency === 'weekly'
+                        ? 'bg-primary text-white'
+                        : 'bg-background-light dark:bg-background-dark text-text-muted hover:bg-primary/10'
+                    }`}
+                  >
+                    Weekly
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowHabitForm(false)} className="flex-1 px-4 py-3 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+              <button onClick={handleCreateHabit} className="flex-1 px-4 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-colors">
+                Create Habit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Category Modal */}
+      {showCategoryForm && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-md w-full p-8">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-black">Create New Category</h3>
+              <button onClick={() => setShowCategoryForm(false)} className="size-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark flex items-center justify-center">
+                <span className="material-symbols-outlined text-sm">close</span>
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Category Name</label>
+                <input
+                  value={newCatName}
+                  onChange={(e) => setNewCatName(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleCreateCategory()}
+                  placeholder="e.g., Work, Personal, Health..."
+                  className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <p className="text-xs text-text-muted italic">A random color will be assigned to your category</p>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowCategoryForm(false)} className="flex-1 px-4 py-3 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+              <button onClick={handleCreateCategory} className="flex-1 px-4 py-3 bg-slate-800 dark:bg-gray-700 text-white rounded-xl font-bold hover:bg-slate-700 dark:hover:bg-gray-600 transition-colors">
+                Create Category
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

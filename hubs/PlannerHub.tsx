@@ -7,13 +7,41 @@ import CalendarPlannerView from './planner-components/CalendarPlannerView';
 import AnalyticsPlannerView from './planner-components/AnalyticsPlannerView';
 import { Task, Habit, TaskStatus, TaskPriority, Category, Subtask } from '../types';
 import { INITIAL_TASKS, INITIAL_HABITS, INITIAL_CATEGORIES } from '../constants';
+import { useEvents } from '../contexts/EventsContext';
 
 const PlannerHub: React.FC = () => {
+  const { addEvent, deleteEventsBySource, events } = useEvents();
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
   const [habits, setHabits] = useState<Habit[]>(INITIAL_HABITS);
   const [categories, setCategories] = useState<Category[]>(INITIAL_CATEGORIES);
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Sync tasks to EventsContext
+  useEffect(() => {
+    // Remove all existing planner events
+    const plannerEvents = events.filter(e => e.source === 'planner');
+    plannerEvents.forEach(e => deleteEventsBySource(e.sourceId));
+
+    // Add tasks with due dates as events
+    tasks.forEach(task => {
+      if (!task.dueDate) return; // Skip tasks without due dates
+
+      const category = categories.find(c => c.id === task.categoryId);
+
+      addEvent({
+        title: task.title,
+        startDate: task.dueDate,
+        category: 'Personal',
+        description: task.description,
+        source: 'planner',
+        sourceId: task.id,
+        colorClass: 'text-orange-600',
+        bgClass: 'bg-orange-100',
+        allDay: true, // Tasks are all-day events
+      });
+    });
+  }, [tasks, categories]);
   
   // Parse active view from URL hash or default to 'planner'
   const getActiveNav = () => {

@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useEvents } from '../contexts/EventsContext';
 
 type SchoolSubView = 'dashboard' | 'calendar' | 'classes' | 'assignments' | 'settings';
 type AssignmentType = 'assignment' | 'quiz' | 'exam' | 'project' | 'discussion' | 'presentation';
@@ -41,6 +42,7 @@ interface AssignmentItem {
 }
 
 const SchoolHub: React.FC = () => {
+  const { addEvent, updateEvent, deleteEventsBySource, events } = useEvents();
   const [currentView, setCurrentView] = useState<SchoolSubView>('dashboard');
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'overview' | 'assignments' | 'syllabus' | 'sessions'>('overview');
@@ -55,7 +57,7 @@ const SchoolHub: React.FC = () => {
   const [editMenuOpen, setEditMenuOpen] = useState<string | null>(null);
   const [editClassModalOpen, setEditClassModalOpen] = useState(false);
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
-  
+
   // View context for Calendar
   const [viewDate, setViewDate] = useState(new Date(2023, 9, 1)); // October 2023
 
@@ -90,6 +92,33 @@ const SchoolHub: React.FC = () => {
     return () => window.removeEventListener('hubSubNavChange', handleSubNav);
   }, []);
 
+  // Sync assignments to EventsContext
+  useEffect(() => {
+    // Remove all existing school events
+    const schoolEvents = events.filter(e => e.source === 'school');
+    schoolEvents.forEach(e => deleteEventsBySource(e.sourceId));
+
+    // Add current assignments as events
+    assignmentData.forEach(assignment => {
+      const cls = classList.find(c => c.id === assignment.classId);
+      if (!cls) return;
+
+      addEvent({
+        title: assignment.title,
+        startDate: assignment.dueDate,
+        startTime: assignment.dueTime,
+        category: 'Study',
+        description: `${cls.name} - ${assignment.type}`,
+        source: 'school',
+        sourceId: assignment.id,
+        colorClass: 'text-blue-600',
+        bgClass: 'bg-blue-100',
+        location: cls.location,
+        allDay: !assignment.dueTime,
+      });
+    });
+  }, [assignmentData, classList]);
+
   const terms: SchoolTerm[] = [
     { id: 't1', name: 'Fall 2023', startDate: '2023-09-01', endDate: '2023-12-15', status: 'active' }
   ];
@@ -108,6 +137,17 @@ const SchoolHub: React.FC = () => {
         }
 
         return { ...a, status: newStatus };
+      }
+      return a;
+    }));
+  };
+
+  const toggleCompletion = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation(); // Prevent triggering parent click events
+    setAssignmentData(prev => prev.map(a => {
+      if (a.id === id) {
+        const isCompleted = ['completed', 'graded', 'submitted'].includes(a.status);
+        return { ...a, status: isCompleted ? 'not started' : 'completed' };
       }
       return a;
     }));
@@ -561,7 +601,14 @@ const SchoolHub: React.FC = () => {
             }).filter(t => t.count > 0);
 
             return (
-              <div key={cls.id} className="bg-white dark:bg-surface-dark p-8 rounded-[40px] border border-gray-100 dark:border-gray-800 shadow-sm group hover:border-primary/20 transition-all cursor-pointer">
+              <div
+                key={cls.id}
+                onClick={() => {
+                  setSelectedClassId(cls.id);
+                  setCurrentView('classes');
+                }}
+                className="bg-white dark:bg-surface-dark p-8 rounded-[40px] border border-gray-100 dark:border-gray-800 shadow-sm group hover:border-primary/20 transition-all cursor-pointer"
+              >
                 <div className="flex items-center gap-4 mb-6">
                   <div className="size-14 rounded-2xl flex items-center justify-center text-white shadow-lg" style={{ backgroundColor: cls.color }}>
                     <span className="material-symbols-outlined text-2xl">book_5</span>
@@ -726,16 +773,23 @@ const SchoolHub: React.FC = () => {
               <div className="p-10 flex flex-col gap-6 max-h-[60vh] overflow-y-auto">
                  {dayAssignments.length > 0 ? dayAssignments.map(a => {
                     const cls = classList.find(c => c.id === a.classId);
+                    const isCompleted = ['completed', 'graded', 'submitted'].includes(a.status);
                     return (
                       <div key={a.id} className="p-8 rounded-[32px] bg-background-light dark:bg-background-dark border border-gray-50 dark:border-gray-800 flex items-center justify-between group hover:border-primary/30 transition-all">
                          <div className="flex items-center gap-8">
+                            <button
+                              onClick={(e) => toggleCompletion(a.id, e)}
+                              className={`size-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-gray-300 dark:border-gray-600 hover:border-primary'}`}
+                            >
+                              {isCompleted && <span className="material-symbols-outlined text-white text-sm">check</span>}
+                            </button>
                             <div className="size-16 rounded-[24px] flex items-center justify-center text-white shadow-lg shrink-0" style={{ backgroundColor: cls?.color }}>
                                <span className="material-symbols-outlined text-2xl">
                                   {['exam', 'quiz'].includes(a.type) ? 'quiz' : 'assignment'}
                                </span>
                             </div>
                             <div>
-                               <h4 className="text-xl font-black text-text-main dark:text-white mb-1 group-hover:text-primary transition-colors">{a.title}</h4>
+                               <h4 className={`text-xl font-black dark:text-white mb-1 group-hover:text-primary transition-colors ${isCompleted ? 'line-through text-text-muted' : 'text-text-main'}`}>{a.title}</h4>
                                <div className="flex items-center gap-3">
                                   <span className="text-[10px] font-black text-text-muted uppercase tracking-widest">{cls?.name}</span>
                                   <span className="size-1 rounded-full bg-text-muted opacity-30"></span>
@@ -744,7 +798,7 @@ const SchoolHub: React.FC = () => {
                             </div>
                          </div>
                          <div className="text-right">
-                            <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${['submitted', 'completed', 'graded'].includes(a.status) ? 'bg-emerald-100 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
+                            <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${isCompleted ? 'bg-emerald-100 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
                                {a.status}
                             </span>
                             {a.dueTime && <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest mt-2">by {a.dueTime}</p>}
@@ -824,9 +878,16 @@ const SchoolHub: React.FC = () => {
                   <div className="flex flex-col gap-1 overflow-hidden">
                      {isValid && dayAssignments.map(a => {
                        const cls = classList.find(c => c.id === a.classId);
+                       const isCompleted = ['completed', 'graded', 'submitted'].includes(a.status);
                        return (
-                         <div key={a.id} className="p-1.5 rounded-lg truncate text-[8px] font-black uppercase text-white shadow-sm transition-transform hover:scale-[1.03]" style={{ backgroundColor: cls?.color || 'var(--color-primary)' }}>
-                           {a.title}
+                         <div
+                           key={a.id}
+                           onClick={(e) => { e.stopPropagation(); toggleCompletion(a.id, e); }}
+                           className={`p-1.5 rounded-lg truncate text-[8px] font-black uppercase text-white shadow-sm transition-all hover:scale-[1.03] cursor-pointer relative ${isCompleted ? 'opacity-60' : ''}`}
+                           style={{ backgroundColor: cls?.color || 'var(--color-primary)' }}
+                         >
+                           {isCompleted && <span className="absolute top-0 right-0 material-symbols-outlined text-white text-[10px]">check_circle</span>}
+                           <span className={isCompleted ? 'line-through' : ''}>{a.title}</span>
                          </div>
                        );
                      })}
@@ -874,13 +935,22 @@ const SchoolHub: React.FC = () => {
                        <div className="flex-1 flex flex-col gap-3">
                           {dayAssignments.length > 0 ? dayAssignments.map(a => {
                             const cls = classList.find(c => c.id === a.classId);
+                            const isCompleted = ['completed', 'graded', 'submitted'].includes(a.status);
                             return (
                               <div key={a.id} className="p-4 rounded-2xl flex flex-col gap-2 shadow-sm transition-all hover:scale-105 active:scale-95 bg-white dark:bg-surface-dark border border-gray-50 dark:border-gray-800">
-                                 <div className="flex items-center gap-2">
-                                    <div className="size-2 rounded-full" style={{ backgroundColor: cls?.color }}></div>
-                                    <span className="text-[8px] font-black uppercase tracking-widest text-text-muted truncate">{cls?.code}</span>
+                                 <div className="flex items-center gap-2 justify-between">
+                                    <div className="flex items-center gap-2">
+                                       <div className="size-2 rounded-full" style={{ backgroundColor: cls?.color }}></div>
+                                       <span className="text-[8px] font-black uppercase tracking-widest text-text-muted truncate">{cls?.code}</span>
+                                    </div>
+                                    <button
+                                      onClick={(e) => toggleCompletion(a.id, e)}
+                                      className={`size-4 rounded border flex items-center justify-center transition-all shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-gray-300 dark:border-gray-600 hover:border-primary'}`}
+                                    >
+                                      {isCompleted && <span className="material-symbols-outlined text-white text-[10px]">check</span>}
+                                    </button>
                                  </div>
-                                 <p className="text-[11px] font-bold leading-tight line-clamp-3 text-text-main dark:text-white">{a.title}</p>
+                                 <p className={`text-[11px] font-bold leading-tight line-clamp-3 dark:text-white ${isCompleted ? 'line-through text-text-muted' : 'text-text-main'}`}>{a.title}</p>
                                  <span className="text-[8px] font-black text-primary uppercase mt-1">Review Now</span>
                               </div>
                             );
@@ -912,16 +982,23 @@ const SchoolHub: React.FC = () => {
               <div className="flex flex-col gap-3">
                  {group.items.map(item => {
                    const cls = classList.find(c => c.id === item.classId);
+                   const isCompleted = ['completed', 'graded', 'submitted'].includes(item.status);
                    return (
                      <div key={item.id} className="group bg-white dark:bg-surface-dark p-6 rounded-[32px] border border-gray-100 dark:border-gray-800 shadow-sm flex items-center justify-between hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer">
                         <div className="flex items-center gap-6">
+                           <button
+                             onClick={(e) => toggleCompletion(item.id, e)}
+                             className={`size-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-gray-300 dark:border-gray-600 hover:border-primary'}`}
+                           >
+                             {isCompleted && <span className="material-symbols-outlined text-white text-sm">check</span>}
+                           </button>
                            <div className="size-14 rounded-2xl flex items-center justify-center text-white shadow-lg" style={{ backgroundColor: cls?.color }}>
                               <span className="material-symbols-outlined text-2xl">
                                  {['exam', 'quiz'].includes(item.type) ? 'quiz' : 'assignment'}
                               </span>
                            </div>
                            <div>
-                              <h4 className="text-lg font-black group-hover:text-primary transition-colors tracking-tight text-text-main dark:text-white">{item.title}</h4>
+                              <h4 className={`text-lg font-black group-hover:text-primary transition-colors tracking-tight dark:text-white ${isCompleted ? 'line-through text-text-muted' : 'text-text-main'}`}>{item.title}</h4>
                               <div className="flex items-center gap-3">
                                  <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest">{cls?.name}</span>
                                  <span className="size-1 rounded-full bg-text-muted opacity-30"></span>
@@ -1185,6 +1262,13 @@ const SchoolHub: React.FC = () => {
 
     return (
       <div className="flex flex-col gap-10 animate-in zoom-in-95 duration-500 pb-20">
+         <button
+           onClick={() => setSelectedClassId(null)}
+           className="flex items-center gap-2 text-text-muted hover:text-primary transition-colors w-fit group"
+         >
+           <span className="material-symbols-outlined">arrow_back</span>
+           <span className="text-sm font-bold uppercase tracking-widest">Back to Classes</span>
+         </button>
          <div className="flex flex-col md:flex-row justify-between items-start gap-10">
             <div className="flex items-center gap-8">
                <div className="size-24 rounded-[32px] flex items-center justify-center text-white shadow-xl shadow-primary/10" style={{ backgroundColor: cls.color }}>
