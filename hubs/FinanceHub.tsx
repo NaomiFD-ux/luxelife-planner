@@ -55,6 +55,16 @@ interface Debt {
   dueDate: number;
 }
 
+interface RecurringExpense {
+  id: string;
+  name: string;
+  amount: number;
+  dueDate: number;
+  frequency: 'monthly' | 'yearly';
+  emoji?: string;
+  category?: string;
+}
+
 interface OneTimeItem {
   id: string;
   name: string;
@@ -81,41 +91,93 @@ const FinanceHub: React.FC = () => {
     return () => window.removeEventListener('hubSubNavChange', handleSubNav);
   }, []);
 
-  // ============== MOCK DATA ==============
-  const incomes: Income[] = [
-    { id: 'i1', source: 'Primary Job', amount: 5000, frequency: 'monthly' },
-    { id: 'i2', source: 'Freelance', amount: 1500, frequency: 'monthly' },
-  ];
+  // ============== STATE MANAGEMENT WITH LOCALSTORAGE ==============
+  const [incomes, setIncomes] = useState<Income[]>(() => {
+    const saved = localStorage.getItem('luxelife_finance_incomes');
+    return saved ? JSON.parse(saved) : [
+      { id: 'i1', source: 'Primary Job', amount: 5000, frequency: 'monthly' },
+      { id: 'i2', source: 'Freelance', amount: 1500, frequency: 'monthly' },
+    ];
+  });
 
-  const bills: Bill[] = [
-    { id: 'b1', name: 'Rent', amount: 1800, dueDate: 1, frequency: 'monthly', category: 'Housing' },
-    { id: 'b2', name: 'Electric', amount: 120, dueDate: 15, frequency: 'monthly', category: 'Utilities' },
-    { id: 'b3', name: 'Internet', amount: 80, dueDate: 10, frequency: 'monthly', category: 'Utilities' },
-    { id: 'b4', name: 'Car Insurance', amount: 150, dueDate: 5, frequency: 'monthly', category: 'Insurance' },
-  ];
+  const [bills, setBills] = useState<Bill[]>(() => {
+    const saved = localStorage.getItem('luxelife_finance_bills');
+    return saved ? JSON.parse(saved) : [
+      { id: 'b1', name: 'Rent', amount: 1800, dueDate: 1, frequency: 'monthly', category: 'Housing' },
+      { id: 'b2', name: 'Electric', amount: 120, dueDate: 15, frequency: 'monthly', category: 'Utilities' },
+      { id: 'b3', name: 'Internet', amount: 80, dueDate: 10, frequency: 'monthly', category: 'Utilities' },
+      { id: 'b4', name: 'Car Insurance', amount: 150, dueDate: 5, frequency: 'monthly', category: 'Insurance' },
+    ];
+  });
 
-  const subscriptions: Subscription[] = [
-    { id: 's1', name: 'Netflix', amount: 15.99, dueDate: 12, frequency: 'monthly' },
-    { id: 's2', name: 'Spotify', amount: 9.99, dueDate: 8, frequency: 'monthly' },
-    { id: 's3', name: 'Gym Membership', amount: 60, dueDate: 1, frequency: 'monthly' },
-    { id: 's4', name: 'Amazon Prime', amount: 139, dueDate: 15, frequency: 'yearly' },
-  ];
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>(() => {
+    const saved = localStorage.getItem('luxelife_finance_subscriptions');
+    return saved ? JSON.parse(saved) : [
+      { id: 's1', name: 'Netflix', amount: 15.99, dueDate: 12, frequency: 'monthly' },
+      { id: 's2', name: 'Spotify', amount: 9.99, dueDate: 8, frequency: 'monthly' },
+      { id: 's3', name: 'Gym Membership', amount: 60, dueDate: 1, frequency: 'monthly' },
+      { id: 's4', name: 'Amazon Prime', amount: 139, dueDate: 15, frequency: 'yearly' },
+    ];
+  });
 
-  const savingsGoals: SavingsGoal[] = [
-    { id: 'sg1', name: 'Emergency Fund', targetAmount: 10000, currentAmount: 7500, deadline: '2024-12-31' },
-    { id: 'sg2', name: 'Vacation', targetAmount: 5000, currentAmount: 2300, deadline: '2024-06-01' },
-  ];
+  const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>(() => {
+    const saved = localStorage.getItem('luxelife_finance_savings');
+    return saved ? JSON.parse(saved) : [
+      { id: 'sg1', name: 'Emergency Fund', targetAmount: 10000, currentAmount: 7500, deadline: '2024-12-31' },
+      { id: 'sg2', name: 'Vacation', targetAmount: 5000, currentAmount: 2300, deadline: '2024-06-01' },
+    ];
+  });
 
-  const debts: Debt[] = [
-    { id: 'd1', name: 'Student Loan', totalAmount: 25000, remainingAmount: 18000, interestRate: 4.5, minimumPayment: 250, dueDate: 20 },
-    { id: 'd2', name: 'Credit Card', totalAmount: 5000, remainingAmount: 2400, interestRate: 18.9, minimumPayment: 100, dueDate: 25 },
-  ];
+  const [debts, setDebts] = useState<Debt[]>(() => {
+    const saved = localStorage.getItem('luxelife_finance_debts');
+    return saved ? JSON.parse(saved) : [
+      { id: 'd1', name: 'Student Loan', totalAmount: 25000, remainingAmount: 18000, interestRate: 4.5, minimumPayment: 250, dueDate: 20 },
+      { id: 'd2', name: 'Credit Card', totalAmount: 5000, remainingAmount: 2400, interestRate: 18.9, minimumPayment: 100, dueDate: 25 },
+    ];
+  });
 
-  const transactions: Transaction[] = [
-    { id: 't1', date: '2024-10-25', description: 'Grocery Shopping', category: 'Food', amount: -85.43, type: 'expense' },
-    { id: 't2', date: '2024-10-24', description: 'Gas Station', category: 'Transportation', amount: -52.00, type: 'expense' },
-    { id: 't3', date: '2024-10-23', description: 'Freelance Payment', category: 'Income', amount: 1500, type: 'income' },
-  ];
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    const saved = localStorage.getItem('luxelife_finance_transactions');
+    return saved ? JSON.parse(saved) : [
+      { id: 't1', date: '2024-10-25', description: 'Grocery Shopping', category: 'Food', amount: -85.43, type: 'expense' },
+      { id: 't2', date: '2024-10-24', description: 'Gas Station', category: 'Transportation', amount: -52.00, type: 'expense' },
+      { id: 't3', date: '2024-10-23', description: 'Freelance Payment', category: 'Income', amount: 1500, type: 'income' },
+    ];
+  });
+
+  // Save to localStorage whenever data changes
+  useEffect(() => {
+    localStorage.setItem('luxelife_finance_incomes', JSON.stringify(incomes));
+  }, [incomes]);
+
+  useEffect(() => {
+    localStorage.setItem('luxelife_finance_bills', JSON.stringify(bills));
+  }, [bills]);
+
+  useEffect(() => {
+    localStorage.setItem('luxelife_finance_subscriptions', JSON.stringify(subscriptions));
+  }, [subscriptions]);
+
+  useEffect(() => {
+    localStorage.setItem('luxelife_finance_savings', JSON.stringify(savingsGoals));
+  }, [savingsGoals]);
+
+  useEffect(() => {
+    localStorage.setItem('luxelife_finance_debts', JSON.stringify(debts));
+  }, [debts]);
+
+  useEffect(() => {
+    localStorage.setItem('luxelife_finance_transactions', JSON.stringify(transactions));
+  }, [transactions]);
+
+  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>(() => {
+    const saved = localStorage.getItem('luxelife_finance_recurring_expenses');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('luxelife_finance_recurring_expenses', JSON.stringify(recurringExpenses));
+  }, [recurringExpenses]);
 
   // One-time items storage (stored with month/year context)
   const [oneTimeItems, setOneTimeItems] = useState<OneTimeItem[]>([]);
@@ -2669,8 +2731,7 @@ const FinanceHub: React.FC = () => {
 
     const handleDeleteIncome = (id: string) => {
       if (confirm('Are you sure you want to delete this income source?')) {
-        // TODO: Implement delete functionality
-        console.log('Delete income:', id);
+        setIncomes(incomes.filter(income => income.id !== id));
       }
     };
 
@@ -2679,8 +2740,23 @@ const FinanceHub: React.FC = () => {
         alert('Please fill in all required fields');
         return;
       }
-      // TODO: Implement save functionality
-      console.log('Save income:', incomeForm);
+
+      if (editingIncome) {
+        // Update existing income
+        setIncomes(incomes.map(income =>
+          income.id === editingIncome.id
+            ? { ...income, ...incomeForm }
+            : income
+        ));
+      } else {
+        // Add new income
+        const newIncome: Income = {
+          id: `i${Date.now()}`,
+          ...incomeForm
+        };
+        setIncomes([...incomes, newIncome]);
+      }
+
       setShowIncomeModal(false);
     };
 
@@ -2739,8 +2815,7 @@ const FinanceHub: React.FC = () => {
 
     const handleDeleteBill = (id: string) => {
       if (confirm('Are you sure you want to delete this bill?')) {
-        // TODO: Implement delete functionality
-        console.log('Delete bill:', id);
+        setBills(bills.filter(bill => bill.id !== id));
       }
     };
 
@@ -2749,8 +2824,31 @@ const FinanceHub: React.FC = () => {
         alert('Please fill in all required fields');
         return;
       }
-      // TODO: Implement save functionality
-      console.log('Save bill:', billForm);
+
+      const billData = {
+        name: billForm.name,
+        amount: billForm.amount,
+        dueDate: billForm.dueDate,
+        frequency: billForm.frequency,
+        category: billForm.category
+      };
+
+      if (editingBill) {
+        // Update existing bill
+        setBills(bills.map(bill =>
+          bill.id === editingBill.id
+            ? { ...bill, ...billData }
+            : bill
+        ));
+      } else {
+        // Add new bill
+        const newBill: Bill = {
+          id: `b${Date.now()}`,
+          ...billData
+        };
+        setBills([...bills, newBill]);
+      }
+
       setShowBillModal(false);
     };
 
@@ -2830,8 +2928,7 @@ const FinanceHub: React.FC = () => {
 
     const handleDeleteSubscription = (id: string) => {
       if (confirm('Are you sure you want to delete this subscription?')) {
-        // TODO: Implement delete functionality
-        console.log('Delete subscription:', id);
+        setSubscriptions(subscriptions.filter(sub => sub.id !== id));
       }
     };
 
@@ -2840,8 +2937,30 @@ const FinanceHub: React.FC = () => {
         alert('Please fill in all required fields');
         return;
       }
-      // TODO: Implement save functionality
-      console.log('Save subscription:', subscriptionForm);
+
+      const subscriptionData = {
+        name: subscriptionForm.name,
+        amount: subscriptionForm.amount,
+        dueDate: subscriptionForm.dueDate,
+        frequency: subscriptionForm.frequency
+      };
+
+      if (editingSubscription) {
+        // Update existing subscription
+        setSubscriptions(subscriptions.map(sub =>
+          sub.id === editingSubscription.id
+            ? { ...sub, ...subscriptionData }
+            : sub
+        ));
+      } else {
+        // Add new subscription
+        const newSubscription: Subscription = {
+          id: `s${Date.now()}`,
+          ...subscriptionData
+        };
+        setSubscriptions([...subscriptions, newSubscription]);
+      }
+
       setShowSubscriptionModal(false);
     };
 
@@ -2928,8 +3047,7 @@ const FinanceHub: React.FC = () => {
 
     const handleDeleteExpense = (id: string) => {
       if (confirm('Are you sure you want to delete this recurring expense?')) {
-        // TODO: Implement delete functionality
-        console.log('Delete expense:', id);
+        setRecurringExpenses(recurringExpenses.filter(expense => expense.id !== id));
       }
     };
 
@@ -2938,8 +3056,31 @@ const FinanceHub: React.FC = () => {
         alert('Please fill in all required fields');
         return;
       }
-      // TODO: Implement save functionality
-      console.log('Save expense:', expenseForm);
+
+      const expenseData = {
+        name: expenseForm.name,
+        amount: expenseForm.amount,
+        dueDate: expenseForm.dueDate,
+        frequency: expenseForm.frequency,
+        emoji: expenseForm.emoji
+      };
+
+      if (editingExpense) {
+        // Update existing expense
+        setRecurringExpenses(recurringExpenses.map(expense =>
+          expense.id === editingExpense.id
+            ? { ...expense, ...expenseData }
+            : expense
+        ));
+      } else {
+        // Add new expense
+        const newExpense: RecurringExpense = {
+          id: `e${Date.now()}`,
+          ...expenseData
+        };
+        setRecurringExpenses([...recurringExpenses, newExpense]);
+      }
+
       setShowExpenseModal(false);
     };
 
@@ -3178,11 +3319,45 @@ const FinanceHub: React.FC = () => {
                 </button>
               </div>
 
-              <div className="text-center py-12">
-                <span className="material-symbols-outlined text-6xl text-text-muted/30 mb-4">receipt_long</span>
-                <p className="text-text-muted mb-4">No recurring expenses set up yet</p>
-                <p className="text-xs text-text-muted">Add recurring monthly expenses like gym memberships, parking fees, etc.</p>
-              </div>
+              {recurringExpenses.length === 0 ? (
+                <div className="text-center py-12">
+                  <span className="material-symbols-outlined text-6xl text-text-muted/30 mb-4">receipt_long</span>
+                  <p className="text-text-muted mb-4">No recurring expenses set up yet</p>
+                  <p className="text-xs text-text-muted">Add recurring monthly expenses like gym memberships, parking fees, etc.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {recurringExpenses.map(expense => (
+                    <div key={expense.id} className="p-4 bg-white dark:bg-surface-dark rounded-2xl border border-gray-100 dark:border-gray-800 flex items-center justify-between hover:border-gray-200 dark:hover:border-gray-700 transition-all">
+                      <div className="flex items-center gap-4">
+                        <div className="size-12 rounded-xl bg-blue-100 dark:bg-blue-950/30 flex items-center justify-center text-2xl">
+                          {expense.emoji || '💰'}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-text-main dark:text-white">{expense.name}</h4>
+                          <p className="text-sm text-text-muted">
+                            ${expense.amount.toFixed(2)} · Due {expense.dueDate}{expense.dueDate === 1 ? 'st' : expense.dueDate === 2 ? 'nd' : expense.dueDate === 3 ? 'rd' : 'th'} of month · {expense.frequency}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleEditExpense(expense)}
+                          className="size-9 rounded-lg bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 flex items-center justify-center text-text-muted hover:text-primary hover:border-primary/30 transition-all"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">edit</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteExpense(expense.id)}
+                          className="size-9 rounded-lg bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 flex items-center justify-center text-text-muted hover:text-red-500 hover:border-red-300 transition-all"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
