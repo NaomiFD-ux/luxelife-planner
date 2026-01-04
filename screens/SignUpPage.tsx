@@ -1,11 +1,18 @@
 
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 const SignUpPage: React.FC = () => {
   const navigate = useNavigate();
+  const { signUp, signInWithGoogle } = useAuth();
+
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const getStrength = () => {
     if (!password) return 0;
@@ -19,9 +26,31 @@ const SignUpPage: React.FC = () => {
 
   const strength = getStrength();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    navigate('/dashboard');
+    setError('');
+    setLoading(true);
+
+    try {
+      await signUp(email, password, name);
+      navigate('/dashboard');
+    } catch (err: any) {
+      setError(err.message || 'Failed to create account. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      await signInWithGoogle();
+      navigate('/dashboard');
+    } catch (err: any) {
+      setError(err.message || 'Failed to sign in with Google.');
+      setLoading(false);
+    }
   };
 
   return (
@@ -58,13 +87,21 @@ const SignUpPage: React.FC = () => {
           </div>
 
           <form className="w-full flex flex-col gap-5" onSubmit={handleSubmit}>
+            {error && (
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 px-4 py-3 rounded-xl text-sm">
+                {error}
+              </div>
+            )}
+
             <label className="flex flex-col w-full group">
               <span className="text-[#181114] dark:text-white text-sm font-semibold pb-2 group-focus-within:text-primary transition-colors">Full Name</span>
               <div className="relative">
                 <input 
                   className="peer form-input w-full rounded-xl border border-[#e6dbe0] dark:border-[#4a3b44] bg-white dark:bg-[#33242d] h-12 px-4 pl-11 text-[#181114] dark:text-white placeholder-[#8a6075] dark:placeholder-[#8a7580] focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none transition-all" 
                   placeholder="Jane Doe" 
-                  type="text" 
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                   required
                 />
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[#8a6075] peer-focus:text-primary transition-colors text-[20px]">person</span>
@@ -77,7 +114,9 @@ const SignUpPage: React.FC = () => {
                 <input 
                   className="peer form-input w-full rounded-xl border border-[#e6dbe0] dark:border-[#4a3b44] bg-white dark:bg-[#33242d] h-12 px-4 pl-11 text-[#181114] dark:text-white placeholder-[#8a6075] dark:placeholder-[#8a7580] focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none transition-all" 
                   placeholder="jane@example.com" 
-                  type="email" 
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   required
                 />
                 <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[#8a6075] peer-focus:text-primary transition-colors text-[20px]">mail</span>
@@ -124,9 +163,12 @@ const SignUpPage: React.FC = () => {
               </span>
             </label>
 
-            <button className="w-full bg-primary hover:bg-pink-600 text-white font-bold h-12 rounded-xl mt-2 transition-all active:scale-[0.98] shadow-lg shadow-primary/30 flex items-center justify-center gap-2">
-              <span>Sign Up</span>
-              <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+            <button 
+              disabled={loading}
+              className="w-full bg-primary hover:bg-pink-600 text-white font-bold h-12 rounded-xl mt-2 transition-all active:scale-[0.98] shadow-lg shadow-primary/30 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span>{loading ? 'Creating Account...' : 'Sign Up'}</span>
+              {!loading && <span className="material-symbols-outlined text-[18px]">arrow_forward</span>}
             </button>
           </form>
 
@@ -137,11 +179,20 @@ const SignUpPage: React.FC = () => {
           </div>
 
           <div className="flex gap-4 w-full">
-            <button className="flex-1 h-12 border border-[#e6dbe0] dark:border-[#4a3b44] rounded-xl flex items-center justify-center hover:bg-gray-50 dark:hover:bg-[#33242d] transition-colors gap-3 bg-white dark:bg-[#2a1b24] text-[#181114] dark:text-white font-medium text-sm group">
+            <button 
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={loading}
+              className="flex-1 h-12 border border-[#e6dbe0] dark:border-[#4a3b44] rounded-xl flex items-center justify-center hover:bg-gray-50 dark:hover:bg-[#33242d] transition-colors gap-3 bg-white dark:bg-[#2a1b24] text-[#181114] dark:text-white font-medium text-sm group disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               <img alt="Google Logo" className="w-5 h-5 group-hover:scale-110 transition-transform" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCv9TIKT5SSfV_SyMov__vtSNXIvQZZN1tayIg2_zbYnXD6aiI9I2Rz1LbKXm8t23zQb51c4Rk74X_wAvRRvSSmrxHImPBUlnDdOMvgUi-AR-MlU0eI5dHoREnzBY6eje0D_dS_bgdnS7uus0seqgXlnSX3MJfTJ9Hau6jQd8Qk3zrkFHrZFxpIDTXrN9pzdqRw7U_r5sA-0r1t1Ztnqolt6YFG63kE07Aen4WgAeVuqdUl4muFE8WBnXWqW8d7aWexIKgYyLwt4Hg" />
               Google
             </button>
-            <button className="flex-1 h-12 border border-[#e6dbe0] dark:border-[#4a3b44] rounded-xl flex items-center justify-center hover:bg-gray-50 dark:hover:bg-[#33242d] transition-colors gap-3 bg-white dark:bg-[#2a1b24] text-[#181114] dark:text-white font-medium text-sm group">
+            <button 
+              type="button"
+              disabled={loading}
+              className="flex-1 h-12 border border-[#e6dbe0] dark:border-[#4a3b44] rounded-xl flex items-center justify-center hover:bg-gray-50 dark:hover:bg-[#33242d] transition-colors gap-3 bg-white dark:bg-[#2a1b24] text-[#181114] dark:text-white font-medium text-sm group disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               <span className="material-symbols-outlined text-black dark:text-white text-[22px] group-hover:scale-110 transition-transform">ios</span>
               Apple
             </button>

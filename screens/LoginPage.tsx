@@ -1,14 +1,44 @@
 
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 const LoginPage: React.FC = () => {
   const navigate = useNavigate();
+  const { signIn, signInWithGoogle } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    navigate('/dashboard');
+    setError('');
+    setLoading(true);
+
+    try {
+      await signIn(email, password);
+      navigate('/dashboard');
+    } catch (err: any) {
+      setError(err.message || 'Failed to sign in. Please check your credentials.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setLoading(true);
+
+    try {
+      await signInWithGoogle();
+      navigate('/dashboard');
+    } catch (err: any) {
+      setError(err.message || 'Failed to sign in with Google.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -43,12 +73,20 @@ const LoginPage: React.FC = () => {
             </div>
 
             <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
+              {error && (
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 px-4 py-3 rounded-xl text-sm mb-2">
+                  {error}
+                </div>
+              )}
+
               <label className="flex flex-col gap-2">
                 <span className="text-[#181114] dark:text-gray-200 text-sm font-semibold pl-1">Email Address</span>
                 <input 
                   className="form-input w-full h-14 px-5 rounded-lg text-[#181114] dark:text-white bg-[#fcfcfc] dark:bg-[#3a222e] border border-[#e6dbe0] dark:border-white/10 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-[#8a6075]/70 dark:placeholder:text-white/30 text-base" 
                   placeholder="name@example.com" 
-                  type="email" 
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   required
                 />
               </label>
@@ -61,7 +99,9 @@ const LoginPage: React.FC = () => {
                   <input 
                     className="form-input w-full h-14 pl-5 pr-12 rounded-lg text-[#181114] dark:text-white bg-[#fcfcfc] dark:bg-[#3a222e] border border-[#e6dbe0] dark:border-white/10 focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all placeholder:text-[#8a6075]/70 dark:placeholder:text-white/30 text-base" 
                     placeholder="••••••••" 
-                    type={showPassword ? "text" : "password"} 
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                     required
                   />
                   <button 
@@ -77,9 +117,12 @@ const LoginPage: React.FC = () => {
                 </div>
               </label>
 
-              <button className="w-full h-14 mt-2 bg-primary hover:bg-pink-600 active:scale-[0.98] text-white text-base font-bold rounded-lg shadow-lg shadow-primary/25 transition-all duration-200 flex items-center justify-center gap-2">
-                <span>Sign In</span>
-                <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
+              <button 
+                disabled={loading}
+                className="w-full h-14 mt-2 bg-primary hover:bg-pink-600 active:scale-[0.98] text-white text-base font-bold rounded-lg shadow-lg shadow-primary/25 transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span>{loading ? 'Signing In...' : 'Sign In'}</span>
+                {!loading && <span className="material-symbols-outlined text-[20px]">arrow_forward</span>}
               </button>
 
               <div className="relative flex py-3 items-center">
@@ -89,11 +132,20 @@ const LoginPage: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <button className="h-12 flex items-center justify-center gap-2 rounded-lg border border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors bg-white dark:bg-transparent group" type="button">
+                <button 
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  disabled={loading}
+                  className="h-12 flex items-center justify-center gap-2 rounded-lg border border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors bg-white dark:bg-transparent group disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <img className="w-5 h-5 group-hover:scale-110 transition-transform" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC9TfOkeTUVLu_q3_xtIeWnNzwQmuKX0cC3496SHajUsDpBq2Nibt9lyiB23xpLVH94Y6M7277-pBYluwEA_MxVrfdWrQmVNX4jOjv3BopPhvakeygnLuVn0QrB8MiA0Ui-xzkgeVhIPG4Ex2yzr8n3mGYycDQyEXXmcnj0MRqtbtStGsldtsuZUb6gqvP5PZeHRTL2QddyMp1xtGovdahGEfEoyUyndE7O-GuPwdOtIBDQc01G167cwM1QPZIuxGOH13ybHrtFaeQ" />
                   <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">Google</span>
                 </button>
-                <button className="h-12 flex items-center justify-center gap-2 rounded-lg border border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors bg-white dark:bg-transparent group" type="button">
+                <button 
+                  type="button"
+                  disabled={loading}
+                  className="h-12 flex items-center justify-center gap-2 rounded-lg border border-gray-200 dark:border-white/10 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors bg-white dark:bg-transparent group disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <span className="material-symbols-outlined text-[22px] text-gray-900 dark:text-white group-hover:scale-110 transition-transform">ios</span>
                   <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">Apple</span>
                 </button>
