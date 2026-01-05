@@ -5,6 +5,7 @@ import { useApp } from '../DashboardApp';
 import { HUB_CONFIGS } from '../constants';
 import HubSwitcher from './HubSwitcher';
 import SettingsModal from './SettingsModal';
+import NotificationDropdown from './NotificationDropdown';
 
 const TopBar: React.FC = () => {
   const { activeHub, user, isDark, setIsDark } = useApp();
@@ -40,10 +41,7 @@ const TopBar: React.FC = () => {
             <span className="material-symbols-outlined text-[20px]">{isDark ? 'light_mode' : 'dark_mode'}</span>
           </button>
 
-          <button className="size-9 flex items-center justify-center rounded-xl bg-background-light dark:bg-background-dark hover:text-primary transition-colors relative shadow-sm">
-            <span className="material-symbols-outlined text-[20px]">notifications</span>
-            <span className="absolute top-2 right-2 size-2 bg-primary rounded-full border-2 border-surface-light dark:border-surface-dark"></span>
-          </button>
+          <NotificationDropdown />
 
           <button
             onClick={() => setIsSettingsOpen(true)}

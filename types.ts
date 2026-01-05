@@ -208,3 +208,73 @@ export interface FastingHistory {
   totalWeightLost: number;
   averageFastDuration: number;
 }
+
+// Notification Types
+export enum NotificationType {
+  // Planner
+  TASK_DUE_SOON = 'task_due_soon',
+  TASK_OVERDUE = 'task_overdue',
+  HABIT_REMINDER = 'habit_reminder',
+  HABIT_STREAK = 'habit_streak',
+
+  // Finance
+  BILL_DUE_SOON = 'bill_due_soon',
+  BILL_OVERDUE = 'bill_overdue',
+  SUBSCRIPTION_RENEWAL = 'subscription_renewal',
+  SAVINGS_GOAL_PROGRESS = 'savings_goal_progress',
+  SAVINGS_GOAL_REACHED = 'savings_goal_reached',
+
+  // School
+  ASSIGNMENT_DUE_SOON = 'assignment_due_soon',
+  ASSIGNMENT_OVERDUE = 'assignment_overdue',
+  EXAM_REMINDER = 'exam_reminder',
+
+  // Job Tracker
+  INTERVIEW_REMINDER = 'interview_reminder',
+  APPLICATION_FOLLOWUP = 'application_followup',
+
+  // Fitness
+  WORKOUT_REMINDER = 'workout_reminder',
+  FASTING_MILESTONE = 'fasting_milestone',
+  FASTING_COMPLETE = 'fasting_complete',
+
+  // Calendar
+  EVENT_REMINDER = 'event_reminder',
+  EVENT_STARTING_SOON = 'event_starting_soon',
+
+  // Bible Study
+  BIBLE_READING_REMINDER = 'bible_reading_reminder',
+  BIBLE_STREAK = 'bible_streak',
+
+  // Vision Board
+  GOAL_CHECK_IN = 'goal_check_in',
+
+  // General
+  ACHIEVEMENT = 'achievement',
+  DAILY_SUMMARY = 'daily_summary',
+  WEEKLY_SUMMARY = 'weekly_summary'
+}
+
+export enum NotificationPriority {
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high',
+  URGENT = 'urgent'
+}
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  priority: NotificationPriority;
+  hub: HubType;
+  read: boolean;
+  dismissed: boolean;
+  createdAt: string; // ISO date string
+  expiresAt?: string; // ISO date string - auto-dismiss after this time
+  actionUrl?: string; // Path to navigate to when clicked
+  actionLabel?: string; // Button text if action available
+  relatedId?: string; // ID of related item (task, bill, event, etc.)
+  icon?: string; // Material icon name
+}

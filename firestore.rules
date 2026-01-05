@@ -189,6 +189,11 @@ service cloud.firestore {
       allow read, write: if isOwner(userId);
     }
 
+    // User Notifications - subcollection under users
+    match /users/{userId}/notifications/{notificationId} {
+      allow read, write: if isOwner(userId);
+    }
+
     // Default deny all other collections
     match /{document=**} {
       allow read, write: if false;
