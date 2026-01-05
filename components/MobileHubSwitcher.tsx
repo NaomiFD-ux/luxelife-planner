@@ -24,10 +24,10 @@ const MobileHubSwitcher: React.FC = () => {
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Invisible backdrop - just for closing when tapping outside */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[998] md:hidden animate-in fade-in duration-200"
+          className="fixed inset-0 z-[998] md:hidden"
           onClick={() => setIsOpen(false)}
         />
       )}
