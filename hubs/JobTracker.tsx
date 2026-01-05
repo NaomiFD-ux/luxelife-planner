@@ -1,6 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useEvents } from '../contexts/EventsContext';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { db } from '../firebase/firebaseConfig';
+import { useAuth } from '../contexts/AuthContext';
 
 type JobSubView = 'dashboard' | 'profile' | 'documents' | 'ai-assistant' | 'applications' | 'settings';
 type JobStage = 'Applied' | 'Screening' | '1st Interview' | '2nd Interview' | 'Final Interview' | 'Offer' | 'Accepted' | 'Rejected';
@@ -26,6 +29,12 @@ interface InterviewPrep {
   notes: string;
 }
 
+interface QuickLink {
+  id: string;
+  label: string;
+  url: string;
+}
+
 interface JobApplication {
   id: string;
   company: string;
@@ -41,6 +50,7 @@ interface JobApplication {
   fullDescription?: string;
   responsibilities?: string[];
   qualifications?: string[];
+  quickLinks?: QuickLink[];
   timeline: StageTimeline[];
   prepData: {
     [key in JobStage]?: InterviewPrep;
@@ -75,7 +85,9 @@ interface VaultDoc {
 
 const JobTracker: React.FC = () => {
   const { addEvent, deleteEventsBySource, events } = useEvents();
+  const { user } = useAuth();
   const [currentView, setCurrentView] = useState<JobSubView>('dashboard');
+  const [loading, setLoading] = useState(true);
   const [selectedJob, setSelectedJob] = useState<JobApplication | null>(null);
   const [activeDocTab, setActiveDocTab] = useState<DocTab>('resumes');
   const [activeAppTab, setActiveAppTab] = useState<AppDetailTab>('interview');
@@ -129,6 +141,18 @@ const JobTracker: React.FC = () => {
   const [resumeForm, setResumeForm] = useState<Partial<ResumeDoc>>({ title: '', tags: [], category: 'Creative', isDefault: false });
   const [coverLetterForm, setCoverLetterForm] = useState<Partial<CoverLetterDoc>>({ title: '', type: 'Template', tags: [] });
   const [vaultForm, setVaultForm] = useState<Partial<VaultDoc>>({ title: '', type: 'Reference' });
+
+  // Job Description Edit modal state
+  const [showJobDescModal, setShowJobDescModal] = useState(false);
+  const [jobDescForm, setJobDescForm] = useState({
+    fullDescription: '',
+    responsibilities: [] as string[],
+    qualifications: [] as string[]
+  });
+
+  // Quick Links Edit modal state
+  const [showQuickLinksModal, setShowQuickLinksModal] = useState(false);
+  const [quickLinksForm, setQuickLinksForm] = useState<QuickLink[]>([]);
 
   // File upload states
   const [resumeFile, setResumeFile] = useState<File | null>(null);
@@ -271,7 +295,9 @@ const JobTracker: React.FC = () => {
   };
 
   // Stage management handlers
-  const moveToStage = (jobId: string, newStage: JobStage) => {
+  const moveToStage = async (jobId: string, newStage: JobStage) => {
+    if (!user) return;
+
     // Check if moving to an interview stage - if so, open date picker
     const interviewStages: JobStage[] = ['Screening', '1st Interview', '2nd Interview', 'Final Interview'];
     if (interviewStages.includes(newStage)) {
@@ -286,72 +312,77 @@ const JobTracker: React.FC = () => {
     }
 
     // For non-interview stages, move directly
-    setApplications(prev => prev.map(app => {
-      if (app.id !== jobId) return app;
+    const app = applications.find(a => a.id === jobId);
+    if (!app) return;
 
-      const stageIndex = STAGE_ORDER.indexOf(newStage);
-      const updatedTimeline = app.timeline.map((item, idx) => ({
-        ...item,
-        completed: idx < stageIndex,
-        date: idx === stageIndex && !item.date ? new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : item.date
-      }));
-
-      return {
-        ...app,
-        stage: newStage,
-        timeline: updatedTimeline
-      };
+    const stageIndex = STAGE_ORDER.indexOf(newStage);
+    const updatedTimeline = app.timeline.map((item, idx) => ({
+      ...item,
+      completed: idx < stageIndex,
+      ...(idx === stageIndex && !item.date ? { date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) } : {})
     }));
 
-    // Update selected job if it's the one being modified
-    if (selectedJob?.id === jobId) {
-      const updatedJob = applications.find(app => app.id === jobId);
-      if (updatedJob) {
-        setSelectedJob({...updatedJob, stage: newStage});
+    const updatedApp = {
+      ...app,
+      stage: newStage,
+      timeline: updatedTimeline,
+      userId: user.uid
+    };
+
+    try {
+      await setDoc(doc(db, 'job_applications', jobId), updatedApp);
+      // Update selected job if it's the one being modified
+      if (selectedJob?.id === jobId) {
+        setSelectedJob(updatedApp);
       }
+    } catch (error) {
+      console.error('Error moving to stage:', error);
     }
   };
 
   // Handle interview date submission
-  const handleInterviewDateSubmit = () => {
+  const handleInterviewDateSubmit = async () => {
+    if (!user) return;
     const { jobId, targetStage, date, time } = interviewDateForm;
 
-    setApplications(prev => prev.map(app => {
-      if (app.id !== jobId) return app;
+    const app = applications.find(a => a.id === jobId);
+    if (!app) return;
 
-      const stageIndex = STAGE_ORDER.indexOf(targetStage);
-      const formattedDate = new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const stageIndex = STAGE_ORDER.indexOf(targetStage);
+    const formattedDate = new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-      const updatedTimeline = app.timeline.map((item, idx) => ({
-        ...item,
-        completed: idx < stageIndex,
-        date: idx === stageIndex ? `${formattedDate} @ ${time}` : item.date
-      }));
-
-      return {
-        ...app,
-        stage: targetStage,
-        timeline: updatedTimeline
-      };
+    const updatedTimeline = app.timeline.map((item, idx) => ({
+      ...item,
+      completed: idx < stageIndex,
+      ...(idx === stageIndex ? { date: `${formattedDate} @ ${time}` } : {})
     }));
 
-    // Update selected job if it's the one being modified
-    if (selectedJob?.id === jobId) {
-      const updatedJob = applications.find(app => app.id === jobId);
-      if (updatedJob) {
-        setSelectedJob({...updatedJob, stage: targetStage});
-      }
-    }
+    const updatedApp = {
+      ...app,
+      stage: targetStage,
+      timeline: updatedTimeline,
+      userId: user.uid
+    };
 
-    setShowInterviewDateModal(false);
+    try {
+      await setDoc(doc(db, 'job_applications', jobId), updatedApp);
+      // Update selected job if it's the one being modified
+      if (selectedJob?.id === jobId) {
+        setSelectedJob(updatedApp);
+      }
+      setShowInterviewDateModal(false);
+    } catch (error) {
+      console.error('Error updating interview date:', error);
+    }
   };
 
   // Handle new application submission
-  const handleNewApplicationSubmit = () => {
-    if (!newAppForm.company.trim() || !newAppForm.role.trim()) return;
+  const handleNewApplicationSubmit = async () => {
+    if (!user || !newAppForm.company.trim() || !newAppForm.role.trim()) return;
 
+    const appId = `app-${Date.now()}`;
     const newApp: JobApplication = {
-      id: `app-${Date.now()}`,
+      id: appId,
       company: newAppForm.company,
       role: newAppForm.role,
       salary: newAppForm.salary || 'Not specified',
@@ -360,72 +391,223 @@ const JobTracker: React.FC = () => {
       dateApplied: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       logo: `https://ui-avatars.com/api/?name=${encodeURIComponent(newAppForm.company)}&background=random`,
       description: newAppForm.description,
-      jobPostingUrl: newAppForm.jobPostingUrl,
       timeline: STAGE_ORDER.map((stage, idx) => ({
         stage,
         label: stage,
         completed: idx === 0,
-        date: idx === 0 ? new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : undefined
+        ...(idx === 0 ? { date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) } : {})
       })),
-      prepData: {}
+      prepData: {},
+      ...(newAppForm.jobPostingUrl && { jobPostingUrl: newAppForm.jobPostingUrl })
     };
 
-    setApplications(prev => [...prev, newApp]);
-    setNewAppForm({
-      company: '',
-      role: '',
-      salary: '',
-      locationType: 'Remote',
-      description: '',
-      jobPostingUrl: ''
-    });
-    setShowNewApplicationModal(false);
+    try {
+      await setDoc(doc(db, 'job_applications', appId), {
+        ...newApp,
+        userId: user.uid,
+        createdAt: new Date().toISOString()
+      });
+      setNewAppForm({
+        company: '',
+        role: '',
+        salary: '',
+        locationType: 'Remote',
+        description: '',
+        jobPostingUrl: ''
+      });
+      setShowNewApplicationModal(false);
+    } catch (error) {
+      console.error('Error creating application:', error);
+    }
   };
 
-  const updatePrepData = (jobId: string, stage: JobStage, prepData: Partial<InterviewPrep>) => {
+  const updatePrepData = async (jobId: string, stage: JobStage, prepData: Partial<InterviewPrep>) => {
+    if (!user) return;
+
+    const app = applications.find(a => a.id === jobId);
+    if (!app) return;
+
+    const updatedPrepData = {
+      ...app.prepData,
+      [stage]: {
+        ...(app.prepData[stage] || {
+          companyResearch: '',
+          resumeContext: '',
+          interviewerName: '',
+          interviewerTitle: '',
+          questionsToAsk: [],
+          notes: ''
+        }),
+        ...prepData
+      }
+    };
+
     // Update selectedJob immediately to prevent focus loss
     if (selectedJob?.id === jobId) {
-      setSelectedJob(prev => prev ? {
-        ...prev,
-        prepData: {
-          ...prev.prepData,
-          [stage]: {
-            ...(prev.prepData[stage] || {
-              companyResearch: '',
-              resumeContext: '',
-              interviewerName: '',
-              interviewerTitle: '',
-              questionsToAsk: [],
-              notes: ''
-            }),
-            ...prepData
-          }
-        }
-      } : null);
+      setSelectedJob(prev => prev ? { ...prev, prepData: updatedPrepData } : null);
     }
 
-    // Then update applications state
-    setApplications(prev => prev.map(app => {
-      if (app.id !== jobId) return app;
-
-      return {
+    try {
+      await setDoc(doc(db, 'job_applications', jobId), {
         ...app,
-        prepData: {
-          ...app.prepData,
-          [stage]: {
-            ...(app.prepData[stage] || {
-              companyResearch: '',
-              resumeContext: '',
-              interviewerName: '',
-              interviewerTitle: '',
-              questionsToAsk: [],
-              notes: ''
-            }),
-            ...prepData
-          }
+        prepData: updatedPrepData,
+        userId: user.uid
+      });
+    } catch (error) {
+      console.error('Error updating prep data:', error);
+    }
+  };
+
+  // Delete application handler
+  const handleDeleteApplication = async () => {
+    if (!user || !selectedJob) return;
+
+    try {
+      // Remove application from Firestore
+      await deleteDoc(doc(db, 'job_applications', selectedJob.id));
+
+      // Remove associated calendar events
+      const jobEvents = events.filter(e => e.source === 'jobs' && e.sourceId?.startsWith(selectedJob.id));
+      jobEvents.forEach(e => {
+        if (e.sourceId) {
+          deleteEventsBySource(e.sourceId);
         }
-      };
+      });
+
+      // Return to applications list
+      setCurrentView('applications');
+      setSelectedJob(null);
+    } catch (error) {
+      console.error('Error deleting application:', error);
+    }
+  };
+
+  // Job Description modal handlers
+  const openJobDescModal = (job: JobApplication) => {
+    setJobDescForm({
+      fullDescription: job.fullDescription || '',
+      responsibilities: job.responsibilities || [''],
+      qualifications: job.qualifications || ['']
+    });
+    setShowJobDescModal(true);
+  };
+
+  const handleSaveJobDescription = async () => {
+    if (!user || !selectedJob) return;
+
+    const filteredResponsibilities = jobDescForm.responsibilities.filter(r => r.trim() !== '');
+    const filteredQualifications = jobDescForm.qualifications.filter(q => q.trim() !== '');
+
+    const updatedApp = {
+      ...selectedJob,
+      userId: user.uid,
+      ...(jobDescForm.fullDescription && { fullDescription: jobDescForm.fullDescription }),
+      ...(filteredResponsibilities.length > 0 && { responsibilities: filteredResponsibilities }),
+      ...(filteredQualifications.length > 0 && { qualifications: filteredQualifications })
+    };
+
+    try {
+      await setDoc(doc(db, 'job_applications', selectedJob.id), updatedApp);
+      // Update selectedJob to reflect changes
+      setSelectedJob(updatedApp);
+      setShowJobDescModal(false);
+    } catch (error) {
+      console.error('Error saving job description:', error);
+    }
+  };
+
+  const addResponsibility = () => {
+    setJobDescForm(prev => ({
+      ...prev,
+      responsibilities: [...prev.responsibilities, '']
     }));
+  };
+
+  const removeResponsibility = (index: number) => {
+    setJobDescForm(prev => ({
+      ...prev,
+      responsibilities: prev.responsibilities.filter((_, i) => i !== index)
+    }));
+  };
+
+  const updateResponsibility = (index: number, value: string) => {
+    setJobDescForm(prev => ({
+      ...prev,
+      responsibilities: prev.responsibilities.map((r, i) => i === index ? value : r)
+    }));
+  };
+
+  const addQualification = () => {
+    setJobDescForm(prev => ({
+      ...prev,
+      qualifications: [...prev.qualifications, '']
+    }));
+  };
+
+  const removeQualification = (index: number) => {
+    setJobDescForm(prev => ({
+      ...prev,
+      qualifications: prev.qualifications.filter((_, i) => i !== index)
+    }));
+  };
+
+  const updateQualification = (index: number, value: string) => {
+    setJobDescForm(prev => ({
+      ...prev,
+      qualifications: prev.qualifications.map((q, i) => i === index ? value : q)
+    }));
+  };
+
+  // Quick Links modal handlers
+  const openQuickLinksModal = (job: JobApplication) => {
+    // Load existing quick links or create default ones from company and job posting URLs
+    const defaultLinks: QuickLink[] = [];
+
+    if (job.companyUrl) {
+      defaultLinks.push({ id: 'company', label: 'Company Career Page', url: job.companyUrl });
+    }
+
+    if (job.jobPostingUrl) {
+      defaultLinks.push({ id: 'posting', label: 'Original Job Posting', url: job.jobPostingUrl });
+    }
+
+    setQuickLinksForm(job.quickLinks && job.quickLinks.length > 0 ? [...job.quickLinks] : defaultLinks);
+    setShowQuickLinksModal(true);
+  };
+
+  const handleSaveQuickLinks = async () => {
+    if (!user || !selectedJob) return;
+
+    const validLinks = quickLinksForm.filter(link => link.url.trim() !== '' && link.label.trim() !== '');
+
+    const updatedApp = {
+      ...selectedJob,
+      userId: user.uid,
+      ...(validLinks.length > 0 && { quickLinks: validLinks })
+    };
+
+    try {
+      await setDoc(doc(db, 'job_applications', selectedJob.id), updatedApp);
+      // Update selectedJob to reflect changes
+      setSelectedJob(updatedApp);
+      setShowQuickLinksModal(false);
+    } catch (error) {
+      console.error('Error saving quick links:', error);
+    }
+  };
+
+  const addQuickLink = () => {
+    setQuickLinksForm([...quickLinksForm, { id: Date.now().toString(), label: '', url: '' }]);
+  };
+
+  const removeQuickLink = (id: string) => {
+    setQuickLinksForm(quickLinksForm.filter(link => link.id !== id));
+  };
+
+  const updateQuickLink = (id: string, field: 'label' | 'url', value: string) => {
+    setQuickLinksForm(quickLinksForm.map(link =>
+      link.id === id ? { ...link, [field]: value } : link
+    ));
   };
 
   useEffect(() => {
@@ -439,88 +621,30 @@ const JobTracker: React.FC = () => {
     return () => window.removeEventListener('hubSubNavChange', handleSubNav);
   }, []);
 
-  const [applications, setApplications] = useState<JobApplication[]>([
-    {
-      id: '1',
-      company: 'Apple',
-      role: 'Senior UI/UX Architect',
-      salary: '$220k - $280k',
-      locationType: 'Hybrid',
-      stage: '2nd Interview',
-      dateApplied: 'Oct 12, 2023',
-      logo: 'https://logo.clearbit.com/apple.com',
-      description: 'Lead design systems for next-gen creative professional tools.',
-      companyUrl: 'https://www.apple.com/careers',
-      jobPostingUrl: 'https://jobs.apple.com/en-us/details/200123456/senior-ui-ux-architect',
-      fullDescription: 'The Design team at Apple is looking for an experienced Senior UI/UX Architect to join our creative professional tools division. You will lead the design systems that power applications used by millions of creative professionals worldwide.',
-      responsibilities: [
-        'Lead the design and development of scalable design systems',
-        'Collaborate with cross-functional teams including engineering, product, and research',
-        'Define and maintain design standards, patterns, and best practices',
-        'Mentor junior designers and contribute to design culture',
-        'Present design concepts to executive leadership'
-      ],
-      qualifications: [
-        '8+ years of experience in UI/UX design',
-        'Expert knowledge of design systems and component libraries',
-        'Proficiency in Figma, Sketch, and prototyping tools',
-        'Strong portfolio demonstrating shipped products at scale',
-        'Excellent communication and leadership skills'
-      ],
-      timeline: [
-        { stage: 'Applied', label: 'Application Submitted', date: 'Oct 12', completed: true },
-        { stage: 'Screening', label: 'Screening Call', date: 'Oct 15', completed: true },
-        { stage: '1st Interview', label: '1st Round Interview', date: 'Oct 18', completed: true },
-        { stage: '2nd Interview', label: '2nd Round Interview', date: 'Oct 25', completed: false },
-        { stage: 'Final Interview', label: 'Final Interview', completed: false },
-        { stage: 'Offer', label: 'Offer Stage', completed: false },
-        { stage: 'Accepted', label: 'Offer Accepted', completed: false },
-      ],
-      prepData: {}
-    },
-    {
-      id: '2',
-      company: 'Stripe',
-      role: 'Product Engineer',
-      salary: '$180k - $240k',
-      locationType: 'Remote',
-      stage: 'Applied',
-      dateApplied: 'Oct 20, 2023',
-      logo: 'https://logo.clearbit.com/stripe.com',
-      description: 'Scaling the financial infrastructure for the internet.',
-      timeline: [
-        { stage: 'Applied', label: 'Application Submitted', date: 'Oct 20', completed: false },
-        { stage: 'Screening', label: 'Screening Call', completed: false },
-        { stage: '1st Interview', label: '1st Round Interview', completed: false },
-        { stage: '2nd Interview', label: '2nd Round Interview', completed: false },
-        { stage: 'Final Interview', label: 'Final Interview', completed: false },
-        { stage: 'Offer', label: 'Offer Stage', completed: false },
-        { stage: 'Accepted', label: 'Offer Accepted', completed: false },
-      ],
-      prepData: {}
-    },
-    {
-      id: '3',
-      company: 'Airbnb',
-      role: 'Lead Designer',
-      salary: '$200k+',
-      locationType: 'Onsite',
-      stage: 'Offer',
-      dateApplied: 'Sep 28, 2023',
-      logo: 'https://logo.clearbit.com/airbnb.com',
-      description: 'Reimagining travel experiences for a post-pandemic world.',
-      timeline: [
-        { stage: 'Applied', label: 'Application Submitted', date: 'Sep 28', completed: true },
-        { stage: 'Screening', label: 'Screening Call', date: 'Oct 02', completed: true },
-        { stage: '1st Interview', label: '1st Round Interview', date: 'Oct 08', completed: true },
-        { stage: '2nd Interview', label: '2nd Round Interview', date: 'Oct 15', completed: true },
-        { stage: 'Final Interview', label: 'Final Interview', date: 'Oct 22', completed: true },
-        { stage: 'Offer', label: 'Offer Received', date: 'Oct 24', completed: false },
-        { stage: 'Accepted', label: 'Offer Accepted', completed: false },
-      ],
-      prepData: {}
+  // Load applications from Firestore with real-time sync
+  const [applications, setApplications] = useState<JobApplication[]>([]);
+
+  useEffect(() => {
+    if (!user) {
+      setLoading(false);
+      return;
     }
-  ]);
+
+    const q = query(collection(db, 'job_applications'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as JobApplication[];
+      setApplications(data);
+      setLoading(false);
+      localStorage.setItem('luxelife_job_applications', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading job applications:', error);
+      const saved = localStorage.getItem('luxelife_job_applications');
+      if (saved) setApplications(JSON.parse(saved));
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   // Sync job interviews to EventsContext
   useEffect(() => {
@@ -550,8 +674,8 @@ const JobTracker: React.FC = () => {
             description: `${app.role} at ${app.company}`,
             source: 'jobs',
             sourceId: `${app.id}-${timelineItem.stage}`,
-            colorClass: 'text-purple-600',
-            bgClass: 'bg-purple-100',
+            colorClass: 'border-slate-600 text-slate-900 dark:text-slate-100',
+            bgClass: 'bg-slate-50 dark:bg-slate-950/30',
             location: app.locationType,
             allDay: false,
           });
@@ -1442,6 +1566,54 @@ const JobTracker: React.FC = () => {
     </div>
   );
 
+  // Horizontal Timeline Component
+  const HorizontalTimeline: React.FC<{ timeline: StageTimeline[], onStageClick: (stage: JobStage) => void }> = ({ timeline, onStageClick }) => {
+    return (
+      <div className="bg-white dark:bg-surface-dark rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm p-6 md:p-8 overflow-x-auto">
+        <div className="flex items-center justify-between gap-2 md:gap-4 min-w-max">
+          {timeline.map((item, idx) => (
+            <div key={item.stage} className="flex items-center gap-2 md:gap-4">
+              {/* Stage circle with checkmark or number */}
+              <div
+                onClick={() => onStageClick(item.stage)}
+                className={`flex flex-col items-center cursor-pointer transition-all ${
+                  item.completed ? 'text-primary' : 'text-gray-400'
+                }`}
+              >
+                <div
+                  className={`size-10 md:size-12 rounded-full flex items-center justify-center border-2 transition-all ${
+                    item.completed
+                      ? 'bg-primary text-white border-primary shadow-lg shadow-primary/30'
+                      : 'border-gray-300 dark:border-gray-700 hover:border-primary/50'
+                  }`}
+                >
+                  {item.completed ? (
+                    <span className="material-symbols-outlined text-[18px] md:text-[20px]">check</span>
+                  ) : (
+                    <span className="text-xs md:text-sm font-bold">{idx + 1}</span>
+                  )}
+                </div>
+                <p className="text-[10px] md:text-xs font-bold mt-2 text-center max-w-[80px]">{item.label}</p>
+                {item.date && (
+                  <p className="text-[8px] md:text-[10px] text-text-muted font-medium">{item.date}</p>
+                )}
+              </div>
+
+              {/* Connecting line */}
+              {idx < timeline.length - 1 && (
+                <div
+                  className={`h-0.5 w-8 md:w-16 flex-shrink-0 ${
+                    item.completed ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-700'
+                  }`}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const ApplicationsView = () => {
     const renderWorkspace = (job: JobApplication) => {
       const isInterviewing = job.stage.includes('Interview');
@@ -1470,6 +1642,12 @@ const JobTracker: React.FC = () => {
                  <p className="text-[10px] font-bold text-text-muted mt-2 uppercase tracking-widest">Salary: {job.salary}</p>
               </div>
            </div>
+
+           {/* Horizontal Timeline */}
+           <HorizontalTimeline
+             timeline={job.timeline}
+             onStageClick={(stage) => moveToStage(job.id, stage)}
+           />
 
            {/* Tabs */}
            <div className="flex gap-2 border-b border-gray-100 dark:border-gray-800">
@@ -1589,29 +1767,46 @@ const JobTracker: React.FC = () => {
                  {/* Job Details Tab */}
                  {activeAppTab === 'details' && (
                    <div className="flex flex-col gap-8">
-                      {/* Company & Job Links */}
+                      {/* Quick Links */}
                       <div className="bg-white dark:bg-surface-dark rounded-[40px] p-10 border border-gray-100 dark:border-gray-800 shadow-sm">
-                         <h3 className="text-xl font-bold mb-6 text-text-main dark:text-white">Quick Links</h3>
-                         <div className="flex flex-col gap-3">
-                            {job.companyUrl && (
-                               <a href={job.companyUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-4 bg-background-light dark:bg-background-dark rounded-2xl hover:bg-primary/5 transition-all group">
-                                  <div className="flex items-center gap-3">
-                                     <span className="material-symbols-outlined text-primary text-xl">business</span>
-                                     <span className="text-sm font-bold text-text-main dark:text-white">Company Career Page</span>
-                                  </div>
-                                  <span className="material-symbols-outlined text-text-muted group-hover:text-primary transition-colors">open_in_new</span>
-                               </a>
-                            )}
-                            {job.jobPostingUrl && (
-                               <a href={job.jobPostingUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-4 bg-background-light dark:bg-background-dark rounded-2xl hover:bg-primary/5 transition-all group">
-                                  <div className="flex items-center gap-3">
-                                     <span className="material-symbols-outlined text-primary text-xl">description</span>
-                                     <span className="text-sm font-bold text-text-main dark:text-white">Original Job Posting</span>
-                                  </div>
-                                  <span className="material-symbols-outlined text-text-muted group-hover:text-primary transition-colors">open_in_new</span>
-                               </a>
-                            )}
+                         <div className="flex items-center justify-between mb-6">
+                            <h3 className="text-xl font-bold text-text-main dark:text-white">Quick Links</h3>
+                            <button
+                               onClick={() => openQuickLinksModal(job)}
+                               className="text-xs font-bold text-primary hover:text-primary/70 flex items-center gap-1 transition-colors"
+                            >
+                               <span className="material-symbols-outlined text-[16px]">edit</span>
+                               Edit
+                            </button>
                          </div>
+
+                         {(job.quickLinks && job.quickLinks.length > 0) ? (
+                            <div className="flex flex-col gap-3">
+                               {job.quickLinks.map(link => (
+                                  <a
+                                     key={link.id}
+                                     href={link.url}
+                                     target="_blank"
+                                     rel="noopener noreferrer"
+                                     className="flex items-center justify-between p-4 bg-background-light dark:bg-background-dark rounded-2xl hover:bg-primary/5 transition-all group"
+                                  >
+                                     <div className="flex items-center gap-3">
+                                        <span className="material-symbols-outlined text-primary text-xl">link</span>
+                                        <span className="text-sm font-bold text-text-main dark:text-white">{link.label}</span>
+                                     </div>
+                                     <span className="material-symbols-outlined text-text-muted group-hover:text-primary transition-colors">open_in_new</span>
+                                  </a>
+                               ))}
+                            </div>
+                         ) : (
+                            <button
+                               onClick={() => openQuickLinksModal(job)}
+                               className="w-full p-6 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-2xl hover:border-primary hover:bg-primary/5 transition-all text-center group"
+                            >
+                               <span className="material-symbols-outlined text-3xl text-text-muted group-hover:text-primary transition-colors mb-2">add_link</span>
+                               <p className="text-sm font-bold text-text-muted group-hover:text-primary transition-colors">Add Quick Links</p>
+                            </button>
+                         )}
                       </div>
 
                       {/* Full Description */}
@@ -1656,89 +1851,45 @@ const JobTracker: React.FC = () => {
               </div>
 
               <div className="lg:col-span-4 flex flex-col gap-8">
+                 {/* Quick Actions */}
                  <div className="bg-white dark:bg-surface-dark rounded-[40px] p-10 border border-gray-100 dark:border-gray-800 shadow-sm">
-                    <div className="flex items-center justify-between mb-6">
-                       <h3 className="text-lg font-bold text-text-main dark:text-white">Application Timeline</h3>
-                       <div className="flex gap-2">
-                          <button
-                             onClick={() => {
-                               const currentIndex = STAGE_ORDER.indexOf(job.stage);
-                               if (currentIndex > 0) {
-                                 moveToStage(job.id, STAGE_ORDER[currentIndex - 1]);
-                               }
-                             }}
-                             disabled={STAGE_ORDER.indexOf(job.stage) <= 0}
-                             className="px-3 py-2 bg-background-light dark:bg-background-dark text-text-main dark:text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-200 dark:hover:bg-gray-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                             ← Prev
-                          </button>
-                          <button
-                             onClick={() => {
-                               const currentIndex = STAGE_ORDER.indexOf(job.stage);
-                               if (currentIndex < STAGE_ORDER.length - 1) {
-                                 moveToStage(job.id, STAGE_ORDER[currentIndex + 1]);
-                               }
-                             }}
-                             disabled={STAGE_ORDER.indexOf(job.stage) >= STAGE_ORDER.length - 1}
-                             className="px-4 py-2 bg-primary text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                             Next →
-                          </button>
-                       </div>
-                    </div>
-                    <div className="flex flex-col gap-4 relative">
-                       <div className="absolute left-2.5 top-2 bottom-2 w-[1px] bg-gray-100 dark:bg-gray-800"></div>
-                       {job.timeline.map((step, i) => {
-                         const isCurrent = step.stage === job.stage;
-                         const canMoveTo = !step.completed && step.stage !== job.stage;
-
-                         return (
-                           <div key={i} className="flex items-start gap-4 relative z-10 group">
-                              <div className={`size-5 rounded-full border-4 flex-shrink-0 mt-1 ${
-                                step.completed
-                                  ? 'bg-green-500 border-green-200 dark:border-green-900'
-                                  : isCurrent
-                                  ? 'bg-primary border-primary/20 shadow-lg shadow-primary/40 animate-pulse'
-                                  : 'bg-gray-100 dark:bg-gray-800 border-white dark:border-surface-dark'
-                              }`}>
-                                {step.completed && (
-                                  <span className="material-symbols-outlined text-white text-[10px] flex items-center justify-center">check</span>
-                                )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                 <div className="flex items-start justify-between gap-2 mb-1">
-                                    <p className={`text-sm font-bold ${
-                                      isCurrent ? 'text-primary' : step.completed ? 'text-green-600 dark:text-green-400' : 'text-text-muted'
-                                    }`}>{step.label}</p>
-                                    {step.date && (
-                                      <p className="text-[9px] font-black text-text-muted uppercase tracking-widest flex-shrink-0">{step.date}</p>
-                                    )}
-                                 </div>
-                                 {canMoveTo && (
-                                   <button
-                                      onClick={() => moveToStage(job.id, step.stage)}
-                                      className="text-[9px] font-black uppercase tracking-widest text-primary hover:text-primary/70 transition-colors opacity-0 group-hover:opacity-100"
-                                   >
-                                      Move to this stage →
-                                   </button>
-                                 )}
-                              </div>
-                           </div>
-                         );
-                       })}
-                    </div>
-                    <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-800 flex gap-3">
+                    <h3 className="text-lg font-bold mb-6 text-text-main dark:text-white">Quick Actions</h3>
+                    <div className="flex flex-col gap-3">
+                       <button
+                          onClick={() => openJobDescModal(job)}
+                          className="w-full py-3 bg-blue-50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-100 dark:hover:bg-blue-900/20 transition-all flex items-center justify-center gap-2"
+                       >
+                          <span className="material-symbols-outlined text-[18px]">edit_note</span>
+                          Edit Job Description
+                       </button>
                        <button
                           onClick={() => moveToStage(job.id, 'Offer')}
-                          className="flex-1 py-3 bg-green-50 dark:bg-green-900/10 text-green-600 dark:text-green-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-green-100 dark:hover:bg-green-900/20 transition-all"
+                          className="w-full py-3 bg-green-50 dark:bg-green-900/10 text-green-600 dark:text-green-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-green-100 dark:hover:bg-green-900/20 transition-all flex items-center justify-center gap-2"
                        >
+                          <span className="material-symbols-outlined text-[18px]">thumb_up</span>
                           Mark as Offered
                        </button>
                        <button
                           onClick={() => moveToStage(job.id, 'Rejected')}
-                          className="flex-1 py-3 bg-red-50 dark:bg-red-900/10 text-red-600 dark:text-red-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-100 dark:hover:bg-red-900/20 transition-all"
+                          className="w-full py-3 bg-red-50 dark:bg-red-900/10 text-red-600 dark:text-red-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-100 dark:hover:bg-red-900/20 transition-all flex items-center justify-center gap-2"
                        >
+                          <span className="material-symbols-outlined text-[18px]">thumb_down</span>
                           Mark as Rejected
+                       </button>
+                    </div>
+
+                    {/* Delete Application */}
+                    <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                       <button
+                          onClick={() => {
+                             if (window.confirm(`Are you sure you want to delete this application for ${job.role} at ${job.company}? This action cannot be undone.`)) {
+                                handleDeleteApplication();
+                             }
+                          }}
+                          className="w-full py-3 bg-red-50 dark:bg-red-900/10 text-red-600 dark:text-red-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-100 dark:hover:bg-red-900/20 transition-all flex items-center justify-center gap-2"
+                       >
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
+                          Delete Application
                        </button>
                     </div>
                  </div>
@@ -2183,8 +2334,8 @@ const JobTracker: React.FC = () => {
                 <label className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2 block">Job URL</label>
                 <input
                   type="url"
-                  value={newAppForm.jobUrl}
-                  onChange={(e) => setNewAppForm({...newAppForm, jobUrl: e.target.value})}
+                  value={newAppForm.jobPostingUrl}
+                  onChange={(e) => setNewAppForm({...newAppForm, jobPostingUrl: e.target.value})}
                   placeholder="https://..."
                   className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm font-medium focus:ring-2 focus:ring-primary/20"
                 />
@@ -2204,6 +2355,229 @@ const JobTracker: React.FC = () => {
               <button onClick={() => setShowNewApplicationModal(false)} className="flex-1 px-4 py-3 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">Cancel</button>
               <button onClick={handleNewApplicationSubmit} className="flex-1 px-4 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-colors">
                 Add Application
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Job Description Edit Modal */}
+      {showJobDescModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-2xl w-full p-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-black text-text-main dark:text-white">Edit Job Description</h3>
+              <button
+                onClick={() => setShowJobDescModal(false)}
+                className="size-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark flex items-center justify-center transition-colors"
+              >
+                <span className="material-symbols-outlined text-text-muted">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* About the Role */}
+              <div>
+                <label className="block text-sm font-bold text-text-main dark:text-white mb-2">About the Role</label>
+                <textarea
+                  value={jobDescForm.fullDescription}
+                  onChange={(e) => setJobDescForm(prev => ({ ...prev, fullDescription: e.target.value }))}
+                  placeholder="Describe the role, company culture, team structure, etc."
+                  className="w-full px-4 py-3 bg-background-light dark:bg-background-dark border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 text-text-main dark:text-white resize-none"
+                  rows={4}
+                />
+              </div>
+
+              {/* Key Responsibilities */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-bold text-text-main dark:text-white">Key Responsibilities</label>
+                  <button
+                    onClick={addResponsibility}
+                    className="text-xs font-bold text-primary hover:text-primary/70 flex items-center gap-1 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">add_circle</span>
+                    Add
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {jobDescForm.responsibilities.map((resp, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={resp}
+                        onChange={(e) => updateResponsibility(index, e.target.value)}
+                        placeholder="e.g., Lead product design initiatives"
+                        className="flex-1 px-4 py-2.5 bg-background-light dark:bg-background-dark border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 text-text-main dark:text-white text-sm"
+                      />
+                      {jobDescForm.responsibilities.length > 1 && (
+                        <button
+                          onClick={() => removeResponsibility(index)}
+                          className="size-9 flex items-center justify-center rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-red-500 transition-colors"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Required Qualifications */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-bold text-text-main dark:text-white">Required Qualifications</label>
+                  <button
+                    onClick={addQualification}
+                    className="text-xs font-bold text-primary hover:text-primary/70 flex items-center gap-1 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">add_circle</span>
+                    Add
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {jobDescForm.qualifications.map((qual, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={qual}
+                        onChange={(e) => updateQualification(index, e.target.value)}
+                        placeholder="e.g., 5+ years of UX design experience"
+                        className="flex-1 px-4 py-2.5 bg-background-light dark:bg-background-dark border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 text-text-main dark:text-white text-sm"
+                      />
+                      {jobDescForm.qualifications.length > 1 && (
+                        <button
+                          onClick={() => removeQualification(index)}
+                          className="size-9 flex items-center justify-center rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-red-500 transition-colors"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowJobDescModal(false)}
+                className="flex-1 px-4 py-3 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-text-main dark:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveJobDescription}
+                className="flex-1 px-4 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-colors"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Links Edit Modal */}
+      {showQuickLinksModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-2xl w-full p-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-black text-text-main dark:text-white">Edit Quick Links</h3>
+              <button
+                onClick={() => setShowQuickLinksModal(false)}
+                className="size-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark flex items-center justify-center transition-colors"
+              >
+                <span className="material-symbols-outlined text-text-muted">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Quick Links List */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="block text-sm font-bold text-text-main dark:text-white">Quick Links</label>
+                  <button
+                    onClick={addQuickLink}
+                    className="text-xs font-bold text-primary hover:text-primary/70 flex items-center gap-1 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">add_circle</span>
+                    Add Link
+                  </button>
+                </div>
+
+                {quickLinksForm.length === 0 ? (
+                  <div className="text-center py-8 text-text-muted">
+                    <span className="material-symbols-outlined text-4xl mb-2">link_off</span>
+                    <p className="text-sm">No quick links yet. Click "Add Link" to get started.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {quickLinksForm.map((link) => (
+                      <div key={link.id} className="p-4 bg-background-light dark:bg-background-dark rounded-xl border border-gray-200 dark:border-gray-700">
+                        <div className="flex items-start gap-3">
+                          <div className="flex-1 space-y-3">
+                            <div>
+                              <label className="block text-xs font-bold text-text-muted mb-1.5">Link Label</label>
+                              <input
+                                type="text"
+                                value={link.label}
+                                onChange={(e) => updateQuickLink(link.id, 'label', e.target.value)}
+                                placeholder="e.g., Company Career Page, LinkedIn Profile"
+                                className="w-full px-3 py-2 bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 text-text-main dark:text-white text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-text-muted mb-1.5">URL</label>
+                              <input
+                                type="url"
+                                value={link.url}
+                                onChange={(e) => updateQuickLink(link.id, 'url', e.target.value)}
+                                placeholder="https://example.com"
+                                className="w-full px-3 py-2 bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 text-text-main dark:text-white text-sm"
+                              />
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => removeQuickLink(link.id)}
+                            className="size-9 flex-shrink-0 flex items-center justify-center rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-red-500 transition-colors mt-6"
+                          >
+                            <span className="material-symbols-outlined text-[18px]">delete</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-xl">info</span>
+                  <div>
+                    <p className="text-xs font-bold text-blue-900 dark:text-blue-200 mb-1">Quick Links Tips</p>
+                    <p className="text-xs text-blue-700 dark:text-blue-300">
+                      Add links to company career pages, job postings, hiring manager LinkedIn profiles,
+                      or any other resources related to this application.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowQuickLinksModal(false)}
+                className="flex-1 px-4 py-3 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-text-main dark:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveQuickLinks}
+                className="flex-1 px-4 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-colors"
+              >
+                Save Changes
               </button>
             </div>
           </div>

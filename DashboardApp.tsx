@@ -8,12 +8,14 @@ import Sidebar from './components/Sidebar';
 import { EventsProvider } from './contexts/EventsContext';
 import { GoogleCalendarProvider } from './contexts/GoogleCalendarContext';
 import { SyncSettingsProvider } from './contexts/SyncSettingsContext';
+import { useAuth } from './contexts/AuthContext';
 
 // Context for global state
 interface DashboardAppContextType {
   activeHub: HubType;
   setActiveHub: (hub: HubType) => void;
   user: UserProfile;
+  setUser: (user: UserProfile) => void;
   isDark: boolean;
   setIsDark: (val: boolean) => void;
   enabledHubs: HubType[];
@@ -89,13 +91,44 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
 const DashboardApp: React.FC = () => {
   const location = useLocation();
+  const { user: authUser } = useAuth();
   const [activeHub, setActiveHub] = useState<HubType>(HubType.DASHBOARD);
   const [isDark, setIsDark] = useState(false);
-  const [user] = useState<UserProfile>({
-    name: 'Sarah Jenkins',
-    plan: 'Pro Plan',
-    avatar: 'https://picsum.photos/id/64/200/200'
+
+  // localStorage-backed user profile
+  const [user, setUser] = useState<UserProfile>(() => {
+    try {
+      const saved = localStorage.getItem('luxelife_user_profile');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (error) {
+      console.error('Failed to load user profile from localStorage:', error);
+    }
+    return {
+      name: 'User',
+      email: '',
+      plan: 'Pro Plan',
+      avatar: ''
+    };
   });
+
+  // Sync Firebase auth user data with local profile
+  useEffect(() => {
+    if (authUser) {
+      setUser(prev => ({
+        ...prev,
+        name: authUser.displayName || prev.name || 'User',
+        email: authUser.email || prev.email || '',
+        avatar: authUser.photoURL || '' // Empty string if no photo
+      }));
+    }
+  }, [authUser]);
+
+  // Save user profile to localStorage
+  useEffect(() => {
+    localStorage.setItem('luxelife_user_profile', JSON.stringify(user));
+  }, [user]);
 
   // All hubs enabled by default
   const [enabledHubs, setEnabledHubs] = useState<HubType[]>(
@@ -136,7 +169,7 @@ const DashboardApp: React.FC = () => {
     <EventsProvider>
       <SyncSettingsProvider>
         <GoogleCalendarProvider>
-          <DashboardAppContext.Provider value={{ activeHub, setActiveHub, user, isDark, setIsDark, enabledHubs, setEnabledHubs }}>
+          <DashboardAppContext.Provider value={{ activeHub, setActiveHub, user, setUser, isDark, setIsDark, enabledHubs, setEnabledHubs }}>
             <MainLayout>
               {renderHub()}
             </MainLayout>

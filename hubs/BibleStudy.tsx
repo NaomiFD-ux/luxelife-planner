@@ -1,5 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { db } from '../firebase/firebaseConfig';
+import { useAuth } from '../contexts/AuthContext';
 
 type BibleSubView = 'dashboard' | 'read' | 'plans' | 'library' | 'notes' | 'settings';
 type LibraryTab = 'categories' | 'favorites' | 'highlights';
@@ -47,24 +50,122 @@ interface LibraryCategory {
 }
 
 const BibleStudy: React.FC = () => {
+  const { user } = useAuth();
   const [currentView, setCurrentView] = useState<BibleSubView>('dashboard');
   const [libraryTab, setLibraryTab] = useState<LibraryTab>('categories');
   const [plansTab, setPlansTab] = useState<PlansTab>('my-plans');
   const [activeBook, setActiveBook] = useState('John 3');
   const [activeChat, setActiveChat] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<LibraryCategory | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Reading features state
+  // Default categories for new users
+  const defaultCategories: LibraryCategory[] = [
+    { id: 'healing', name: 'Healing', count: 0, color: '#fee2e2', icon: 'favorite' },
+    { id: 'mental-health', name: 'Mental Health', count: 0, color: '#f0fdf4', icon: 'psychology' },
+    { id: 'prayer', name: 'Prayer Life', count: 0, color: '#eff6ff', icon: 'auto_awesome' },
+    { id: 'strength', name: 'Strength', count: 0, color: '#fefce8', icon: 'fitness_center' },
+    { id: 'finances', name: 'Finances', count: 0, color: '#faf5ff', icon: 'payments' },
+    { id: 'wisdom', name: 'Wisdom', count: 0, color: '#fff1f2', icon: 'lightbulb' },
+  ];
+
+  // Reading features state - initialized empty, loaded from Firestore
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [verseNotes, setVerseNotes] = useState<VerseNote[]>([]);
-  const [libraryCategories, setLibraryCategories] = useState<LibraryCategory[]>([
-    { id: 'healing', name: 'Healing', count: 12, color: '#fee2e2', icon: 'favorite' },
-    { id: 'mental-health', name: 'Mental Health', count: 8, color: '#f0fdf4', icon: 'psychology' },
-    { id: 'prayer', name: 'Prayer Life', count: 24, color: '#eff6ff', icon: 'auto_awesome' },
-    { id: 'strength', name: 'Strength', count: 15, color: '#fefce8', icon: 'fitness_center' },
-    { id: 'finances', name: 'Finances', count: 5, color: '#faf5ff', icon: 'payments' },
-    { id: 'wisdom', name: 'Wisdom', count: 21, color: '#fff1f2', icon: 'lightbulb' },
-  ]);
+  const [libraryCategories, setLibraryCategories] = useState<LibraryCategory[]>(defaultCategories);
+
+  // Load highlights from Firestore
+  useEffect(() => {
+    if (!user) {
+      setHighlights([]);
+      setLoading(false);
+      return;
+    }
+
+    const q = query(collection(db, 'bible_highlights'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Highlight[];
+      setHighlights(data);
+      localStorage.setItem('luxelife_bible_highlights', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading highlights:', error);
+      const saved = localStorage.getItem('luxelife_bible_highlights');
+      if (saved) setHighlights(JSON.parse(saved));
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load favorites from Firestore
+  useEffect(() => {
+    if (!user) {
+      setFavorites([]);
+      return;
+    }
+
+    const q = query(collection(db, 'bible_favorites'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Favorite[];
+      setFavorites(data);
+      localStorage.setItem('luxelife_bible_favorites', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading favorites:', error);
+      const saved = localStorage.getItem('luxelife_bible_favorites');
+      if (saved) setFavorites(JSON.parse(saved));
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load verse notes from Firestore
+  useEffect(() => {
+    if (!user) {
+      setVerseNotes([]);
+      return;
+    }
+
+    const q = query(collection(db, 'bible_notes'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as VerseNote[];
+      setVerseNotes(data);
+      localStorage.setItem('luxelife_bible_notes', JSON.stringify(data));
+      setLoading(false);
+    }, (error) => {
+      console.error('Firestore error loading notes:', error);
+      const saved = localStorage.getItem('luxelife_bible_notes');
+      if (saved) setVerseNotes(JSON.parse(saved));
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load library categories from Firestore
+  useEffect(() => {
+    if (!user) {
+      setLibraryCategories(defaultCategories);
+      return;
+    }
+
+    const q = query(collection(db, 'bible_categories'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (snapshot.empty) {
+        // No categories yet, use defaults
+        setLibraryCategories(defaultCategories);
+      } else {
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as LibraryCategory[];
+        setLibraryCategories(data);
+        localStorage.setItem('luxelife_bible_categories', JSON.stringify(data));
+      }
+    }, (error) => {
+      console.error('Firestore error loading categories:', error);
+      const saved = localStorage.getItem('luxelife_bible_categories');
+      if (saved) setLibraryCategories(JSON.parse(saved));
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   // Selection and highlighting state
   const [selectedText, setSelectedText] = useState('');
@@ -74,6 +175,111 @@ const BibleStudy: React.FC = () => {
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [currentNoteText, setCurrentNoteText] = useState('');
+  const [showNewCategoryModal, setShowNewCategoryModal] = useState(false);
+  const [newCategoryForm, setNewCategoryForm] = useState({
+    name: '',
+    color: '#fee2e2',
+    icon: 'favorite'
+  });
+
+  // Delete modals state
+  const [showDeleteHighlightModal, setShowDeleteHighlightModal] = useState(false);
+  const [highlightToDelete, setHighlightToDelete] = useState<string | null>(null);
+  const [showDeleteFavoriteModal, setShowDeleteFavoriteModal] = useState(false);
+  const [favoriteToDelete, setFavoriteToDelete] = useState<string | null>(null);
+  const [showDeleteNoteModal, setShowDeleteNoteModal] = useState(false);
+  const [noteToDelete, setNoteToDelete] = useState<string | null>(null);
+  const [showDeleteCategoryModal, setShowDeleteCategoryModal] = useState(false);
+  const [categoryToDelete, setCategoryToDelete] = useState<string | null>(null);
+
+  // Firestore save helper functions
+  const saveHighlightToFirestore = async (highlight: Highlight) => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'bible_highlights', highlight.id), {
+        ...highlight,
+        userId: user.uid,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error saving highlight to Firestore:', error);
+    }
+  };
+
+  const saveFavoriteToFirestore = async (favorite: Favorite) => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'bible_favorites', favorite.id), {
+        ...favorite,
+        userId: user.uid,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error saving favorite to Firestore:', error);
+    }
+  };
+
+  const saveNoteToFirestore = async (note: VerseNote) => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'bible_notes', note.id), {
+        ...note,
+        userId: user.uid,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error saving note to Firestore:', error);
+    }
+  };
+
+  const saveCategoryToFirestore = async (category: LibraryCategory) => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'bible_categories', category.id), {
+        ...category,
+        userId: user.uid,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error saving category to Firestore:', error);
+    }
+  };
+
+  const deleteHighlightFromFirestore = async (highlightId: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'bible_highlights', highlightId));
+    } catch (error) {
+      console.error('Error deleting highlight from Firestore:', error);
+    }
+  };
+
+  const deleteFavoriteFromFirestore = async (favoriteId: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'bible_favorites', favoriteId));
+    } catch (error) {
+      console.error('Error deleting favorite from Firestore:', error);
+    }
+  };
+
+  const deleteNoteFromFirestore = async (noteId: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'bible_notes', noteId));
+    } catch (error) {
+      console.error('Error deleting note from Firestore:', error);
+    }
+  };
+
+  const deleteCategoryFromFirestore = async (categoryId: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'bible_categories', categoryId));
+    } catch (error) {
+      console.error('Error deleting category from Firestore:', error);
+    }
+  };
 
   useEffect(() => {
     const handleSubNav = (e: any) => {
@@ -166,12 +372,18 @@ const BibleStudy: React.FC = () => {
                Recently Saved
              </h4>
              <div className="flex flex-col gap-2">
-               {['Romans 8:28', 'Psalm 23:1', 'Philippians 4:13'].map((verse, i) => (
-                 <div key={i} className="flex items-center justify-between p-3 rounded-xl bg-background-light dark:bg-background-dark hover:bg-primary/5 cursor-pointer transition-colors group">
-                    <span className="text-xs font-bold">{verse}</span>
-                    <span className="material-symbols-outlined text-xs text-text-muted group-hover:text-primary transition-colors">chevron_right</span>
+               {favorites.length === 0 ? (
+                 <div className="text-center py-4">
+                   <p className="text-xs text-text-muted">No saved verses yet</p>
                  </div>
-               ))}
+               ) : (
+                 favorites.slice(0, 3).map((fav) => (
+                   <div key={fav.id} className="flex items-center justify-between p-3 rounded-xl bg-background-light dark:bg-background-dark hover:bg-primary/5 cursor-pointer transition-colors group">
+                      <span className="text-xs font-bold">{fav.verseRef}</span>
+                      <span className="material-symbols-outlined text-xs text-text-muted group-hover:text-primary transition-colors">chevron_right</span>
+                   </div>
+                 ))
+               )}
              </div>
           </div>
         </div>
@@ -199,6 +411,7 @@ const BibleStudy: React.FC = () => {
         categories: []
       };
       setHighlights(prev => [...prev, newHighlight]);
+      saveHighlightToFirestore(newHighlight); // Save to Firestore
       setShowHighlightMenu(false);
       setSelectedText('');
     }
@@ -214,6 +427,7 @@ const BibleStudy: React.FC = () => {
         categories: []
       };
       setFavorites(prev => [...prev, newFavorite]);
+      saveFavoriteToFirestore(newFavorite); // Save to Firestore
       setShowHighlightMenu(false);
       setSelectedText('');
     }
@@ -221,29 +435,100 @@ const BibleStudy: React.FC = () => {
 
   const handleAddToCategory = (categoryId: string, itemId: string, itemType: 'highlight' | 'favorite') => {
     if (itemType === 'highlight') {
-      setHighlights(prev => prev.map(h =>
-        h.id === itemId ? { ...h, categories: [...h.categories, categoryId] } : h
-      ));
+      const updatedHighlight = highlights.find(h => h.id === itemId);
+      if (updatedHighlight) {
+        const newHighlight = { ...updatedHighlight, categories: [...updatedHighlight.categories, categoryId] };
+        setHighlights(prev => prev.map(h => h.id === itemId ? newHighlight : h));
+        saveHighlightToFirestore(newHighlight); // Save to Firestore
+      }
     } else {
-      setFavorites(prev => prev.map(f =>
-        f.id === itemId ? { ...f, categories: [...f.categories, categoryId] } : f
-      ));
+      const updatedFavorite = favorites.find(f => f.id === itemId);
+      if (updatedFavorite) {
+        const newFavorite = { ...updatedFavorite, categories: [...updatedFavorite.categories, categoryId] };
+        setFavorites(prev => prev.map(f => f.id === itemId ? newFavorite : f));
+        saveFavoriteToFirestore(newFavorite); // Save to Firestore
+      }
     }
   };
 
   const handleSaveNote = () => {
-    if (currentNoteText.trim() && selectedVerseRef) {
+    if (currentNoteText.trim()) {
       const newNote: VerseNote = {
         id: `n-${Date.now()}`,
-        verseRef: selectedVerseRef,
+        verseRef: selectedVerseRef || 'General Note',
         note: currentNoteText.trim(),
         dateAdded: new Date().toISOString()
       };
       setVerseNotes(prev => [...prev, newNote]);
+      saveNoteToFirestore(newNote); // Save to Firestore
       setCurrentNoteText('');
       setShowNoteModal(false);
       setSelectedText('');
       setSelectedVerseRef('');
+    }
+  };
+
+  const handleCreateCategory = () => {
+    if (newCategoryForm.name.trim()) {
+      const newCategory: LibraryCategory = {
+        id: `cat-${Date.now()}`,
+        name: newCategoryForm.name.trim(),
+        count: 0,
+        color: newCategoryForm.color,
+        icon: newCategoryForm.icon
+      };
+      setLibraryCategories(prev => [...prev, newCategory]);
+      saveCategoryToFirestore(newCategory); // Save to Firestore
+      setNewCategoryForm({ name: '', color: '#fee2e2', icon: 'favorite' });
+      setShowNewCategoryModal(false);
+    }
+  };
+
+  const handleDeleteHighlight = () => {
+    if (highlightToDelete) {
+      deleteHighlightFromFirestore(highlightToDelete); // Delete from Firestore
+      setHighlights(prev => prev.filter(h => h.id !== highlightToDelete));
+      setHighlightToDelete(null);
+      setShowDeleteHighlightModal(false);
+    }
+  };
+
+  const handleDeleteFavorite = () => {
+    if (favoriteToDelete) {
+      deleteFavoriteFromFirestore(favoriteToDelete); // Delete from Firestore
+      setFavorites(prev => prev.filter(f => f.id !== favoriteToDelete));
+      setFavoriteToDelete(null);
+      setShowDeleteFavoriteModal(false);
+    }
+  };
+
+  const handleDeleteNote = () => {
+    if (noteToDelete) {
+      deleteNoteFromFirestore(noteToDelete); // Delete from Firestore
+      setVerseNotes(prev => prev.filter(n => n.id !== noteToDelete));
+      setNoteToDelete(null);
+      setShowDeleteNoteModal(false);
+    }
+  };
+
+  const handleDeleteCategory = () => {
+    if (categoryToDelete) {
+      deleteCategoryFromFirestore(categoryToDelete); // Delete from Firestore
+      setLibraryCategories(prev => prev.filter(c => c.id !== categoryToDelete));
+      // Also remove this category from all favorites that use it
+      const updatedFavorites = favorites.map(f => ({
+        ...f,
+        categories: f.categories?.filter(c => c !== categoryToDelete) || []
+      }));
+      setFavorites(updatedFavorites);
+      // Update each affected favorite in Firestore
+      updatedFavorites.forEach(f => {
+        if (f.categories !== favorites.find(orig => orig.id === f.id)?.categories) {
+          saveFavoriteToFirestore(f);
+        }
+      });
+      setCategoryToDelete(null);
+      setShowDeleteCategoryModal(false);
     }
   };
 
@@ -442,10 +727,23 @@ const BibleStudy: React.FC = () => {
                   <span className="material-symbols-outlined text-sm">close</span>
                 </button>
               </div>
-              <div className="mb-4">
-                <p className="text-sm text-text-muted mb-2">{selectedVerseRef}</p>
-                <p className="text-sm italic bg-background-light dark:bg-background-dark p-3 rounded-xl">"{selectedText}"</p>
-              </div>
+              {selectedText ? (
+                <div className="mb-4">
+                  <p className="text-sm text-text-muted mb-2">{selectedVerseRef}</p>
+                  <p className="text-sm italic bg-background-light dark:bg-background-dark p-3 rounded-xl">"{selectedText}"</p>
+                </div>
+              ) : (
+                <div className="mb-4">
+                  <label className="text-xs font-bold text-text-muted mb-2 block">Verse Reference (Optional)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g., John 3:16, Psalm 23:1"
+                    value={selectedVerseRef}
+                    onChange={(e) => setSelectedVerseRef(e.target.value)}
+                    className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+              )}
               <textarea
                 className="w-full h-32 bg-background-light dark:bg-background-dark border-none rounded-xl p-4 text-sm focus:ring-2 focus:ring-primary/20 resize-none"
                 placeholder="Write your reflection..."
@@ -502,18 +800,88 @@ const BibleStudy: React.FC = () => {
         </div>
       </div>
 
-      {libraryTab === 'categories' && (
+      {libraryTab === 'categories' && selectedCategory && (
+        <div className="animate-in slide-in-from-bottom-2">
+          {/* Back button */}
+          <button
+            onClick={() => setSelectedCategory(null)}
+            className="flex items-center gap-2 text-sm font-bold text-text-muted hover:text-primary mb-6 transition-colors"
+          >
+            <span className="material-symbols-outlined text-lg">arrow_back</span>
+            Back to Categories
+          </button>
+
+          {/* Category header */}
+          <div className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm mb-6">
+            <div className="flex items-center gap-4">
+              <div className="size-16 rounded-xl flex items-center justify-center" style={{ backgroundColor: selectedCategory.color }}>
+                <span className="material-symbols-outlined text-gray-800 text-2xl">{selectedCategory.icon}</span>
+              </div>
+              <div>
+                <h3 className="text-xl font-black">{selectedCategory.name}</h3>
+                <p className="text-sm text-text-muted">
+                  {favorites.filter(f => f.category === selectedCategory.id).length} verses in this category
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Filtered verses */}
+          <div className="flex flex-col gap-3">
+            {favorites.filter(f => f.category === selectedCategory.id).length === 0 ? (
+              <div className="bg-white dark:bg-surface-dark p-8 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm text-center">
+                <span className="material-symbols-outlined text-4xl text-text-muted mb-2">{selectedCategory.icon}</span>
+                <p className="text-sm text-text-muted font-medium">No verses in this category yet.</p>
+                <p className="text-xs text-text-muted mt-1">Add verses to this category from the Read section!</p>
+              </div>
+            ) : (
+              favorites
+                .filter(f => f.category === selectedCategory.id)
+                .map((fav) => (
+                  <div key={fav.id} className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col gap-2">
+                    <h4 className="text-xs font-black text-primary uppercase tracking-[0.15em]">{fav.verseRef}</h4>
+                    <p className="text-sm font-medium leading-relaxed italic">"{fav.text}"</p>
+                    <p className="text-[10px] text-text-muted font-bold mt-1">Added {new Date(fav.dateAdded).toLocaleDateString()}</p>
+                  </div>
+                ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {libraryTab === 'categories' && !selectedCategory && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 animate-in slide-in-from-bottom-2">
           {libraryCategories.map((cat) => (
-            <div key={cat.id} className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer group">
-              <div className="size-12 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform" style={{ backgroundColor: cat.color }}>
-                <span className="material-symbols-outlined text-gray-800 text-base">{cat.icon}</span>
+            <div
+              key={cat.id}
+              className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative"
+            >
+              <div
+                onClick={() => setSelectedCategory(cat)}
+                className="cursor-pointer"
+              >
+                <div className="size-12 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform" style={{ backgroundColor: cat.color }}>
+                  <span className="material-symbols-outlined text-gray-800 text-base">{cat.icon}</span>
+                </div>
+                <h4 className="text-base font-bold mb-1">{cat.name}</h4>
+                <p className="text-[10px] text-text-muted font-bold uppercase tracking-widest">{cat.count} Verses</p>
               </div>
-              <h4 className="text-base font-bold mb-1">{cat.name}</h4>
-              <p className="text-[10px] text-text-muted font-bold uppercase tracking-widest">{cat.count} Verses</p>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCategoryToDelete(cat.id);
+                  setShowDeleteCategoryModal(true);
+                }}
+                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity size-7 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 flex items-center justify-center"
+              >
+                <span className="material-symbols-outlined text-sm text-red-600">delete</span>
+              </button>
             </div>
           ))}
-          <button className="border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl p-6 flex flex-col items-center justify-center gap-2 hover:border-primary/50 hover:bg-primary/5 transition-all text-text-muted hover:text-primary">
+          <button
+            onClick={() => setShowNewCategoryModal(true)}
+            className="border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl p-6 flex flex-col items-center justify-center gap-2 hover:border-primary/50 hover:bg-primary/5 transition-all text-text-muted hover:text-primary"
+          >
             <span className="material-symbols-outlined text-2xl">add_circle</span>
             <span className="text-xs font-bold">New Category</span>
           </button>
@@ -529,10 +897,21 @@ const BibleStudy: React.FC = () => {
             </div>
           ) : (
             favorites.map((fav) => (
-              <div key={fav.id} className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col gap-2">
-                <h4 className="text-xs font-black text-primary uppercase tracking-[0.15em]">{fav.verseRef}</h4>
-                <p className="text-sm font-medium leading-relaxed italic">"{fav.text}"</p>
-                <p className="text-[10px] text-text-muted font-bold mt-1">Added {new Date(fav.dateAdded).toLocaleDateString()}</p>
+              <div key={fav.id} className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm flex gap-4 group">
+                <div className="flex-1">
+                  <h4 className="text-xs font-black text-primary uppercase tracking-[0.15em]">{fav.verseRef}</h4>
+                  <p className="text-sm font-medium leading-relaxed italic">"{fav.text}"</p>
+                  <p className="text-[10px] text-text-muted font-bold mt-1">Added {new Date(fav.dateAdded).toLocaleDateString()}</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setFavoriteToDelete(fav.id);
+                    setShowDeleteFavoriteModal(true);
+                  }}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity size-8 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 flex items-center justify-center shrink-0"
+                >
+                  <span className="material-symbols-outlined text-sm text-red-600">delete</span>
+                </button>
               </div>
             ))
           )}
@@ -559,13 +938,22 @@ const BibleStudy: React.FC = () => {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {colorHighlights.map((high) => (
-                      <div key={high.id} className="bg-white dark:bg-surface-dark p-4 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm flex items-start gap-3">
+                      <div key={high.id} className="bg-white dark:bg-surface-dark p-4 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm flex items-start gap-3 group relative">
                         <div className="size-3 rounded-full mt-1 shrink-0" style={{ backgroundColor: high.color }}></div>
-                        <div>
+                        <div className="flex-1">
                           <h4 className="text-xs font-bold mb-1">{high.verseRef}</h4>
                           <p className="text-xs text-text-muted italic">"{high.text}"</p>
                           <p className="text-[9px] text-text-muted font-bold mt-1">Added {new Date(high.dateAdded).toLocaleDateString()}</p>
                         </div>
+                        <button
+                          onClick={() => {
+                            setHighlightToDelete(high.id);
+                            setShowDeleteHighlightModal(true);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity size-6 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 flex items-center justify-center shrink-0"
+                        >
+                          <span className="material-symbols-outlined text-sm text-red-600">delete</span>
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -584,7 +972,15 @@ const BibleStudy: React.FC = () => {
         <h2 className="text-2xl font-black tracking-tight">Spiritual Reflections</h2>
         <div className="flex gap-2">
            <button className="p-2 bg-white dark:bg-surface-dark rounded-lg border border-gray-100 dark:border-gray-800 shadow-sm"><span className="material-symbols-outlined text-base">filter_list</span></button>
-           <button className="bg-primary text-white px-5 py-2 rounded-xl font-bold text-sm shadow-lg shadow-primary/20 flex items-center gap-2">
+           <button
+             onClick={() => {
+               setSelectedText('');
+               setSelectedVerseRef('');
+               setCurrentNoteText('');
+               setShowNoteModal(true);
+             }}
+             className="bg-primary text-white px-5 py-2 rounded-xl font-bold text-sm shadow-lg shadow-primary/20 flex items-center gap-2"
+           >
              <span className="material-symbols-outlined text-sm">add</span> New Note
            </button>
         </div>
@@ -597,18 +993,338 @@ const BibleStudy: React.FC = () => {
           </div>
         ) : (
           verseNotes.map((note) => (
-            <div key={note.id} className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-md transition-all cursor-pointer">
+            <div key={note.id} className="bg-white dark:bg-surface-dark p-6 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-md transition-all group">
               <div className="flex justify-between items-start mb-3">
                 <div className="flex items-center gap-2 text-[10px] font-bold text-primary uppercase tracking-[0.15em]">
                   <span className="material-symbols-outlined text-sm">bookmark</span> {note.verseRef}
                 </div>
-                <span className="text-[10px] text-text-muted font-bold">{new Date(note.dateAdded).toLocaleDateString()}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-text-muted font-bold">{new Date(note.dateAdded).toLocaleDateString()}</span>
+                  <button
+                    onClick={() => {
+                      setNoteToDelete(note.id);
+                      setShowDeleteNoteModal(true);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity size-6 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 flex items-center justify-center"
+                  >
+                    <span className="material-symbols-outlined text-sm text-red-600">delete</span>
+                  </button>
+                </div>
               </div>
               <p className="text-sm text-text-muted leading-relaxed">{note.note}</p>
             </div>
           ))
         )}
       </div>
+
+      {/* Note Modal */}
+      {showNoteModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-black">Add Note</h3>
+              <button
+                onClick={() => setShowNoteModal(false)}
+                className="size-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark flex items-center justify-center"
+              >
+                <span className="material-symbols-outlined text-sm">close</span>
+              </button>
+            </div>
+            {selectedText ? (
+              <div className="mb-4">
+                <p className="text-sm text-text-muted mb-2">{selectedVerseRef}</p>
+                <p className="text-sm italic bg-background-light dark:bg-background-dark p-3 rounded-xl">"{selectedText}"</p>
+              </div>
+            ) : (
+              <div className="mb-4">
+                <label className="text-xs font-bold text-text-muted mb-2 block">Verse Reference (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g., John 3:16, Psalm 23:1"
+                  value={selectedVerseRef}
+                  onChange={(e) => setSelectedVerseRef(e.target.value)}
+                  className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+            )}
+            <textarea
+              className="w-full h-32 bg-background-light dark:bg-background-dark border-none rounded-xl p-4 text-sm focus:ring-2 focus:ring-primary/20 resize-none"
+              placeholder="Write your reflection..."
+              value={currentNoteText}
+              onChange={(e) => setCurrentNoteText(e.target.value)}
+            ></textarea>
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => setShowNoteModal(false)}
+                className="flex-1 px-4 py-2.5 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveNote}
+                className="flex-1 px-4 py-2.5 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-colors"
+              >
+                Save Note
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Category Modal */}
+      {showNewCategoryModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-black">Create New Category</h3>
+              <button
+                onClick={() => setShowNewCategoryModal(false)}
+                className="size-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark flex items-center justify-center"
+              >
+                <span className="material-symbols-outlined text-sm">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Category Name */}
+              <div>
+                <label className="text-xs font-bold text-text-muted mb-2 block">Category Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g., Strength, Peace, Wisdom"
+                  value={newCategoryForm.name}
+                  onChange={(e) => setNewCategoryForm({ ...newCategoryForm, name: e.target.value })}
+                  className="w-full bg-background-light dark:bg-background-dark border-none rounded-xl p-3 text-sm focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+
+              {/* Color Picker */}
+              <div>
+                <label className="text-xs font-bold text-text-muted mb-2 block">Color</label>
+                <div className="grid grid-cols-6 gap-2">
+                  {[
+                    '#fee2e2', // red
+                    '#f0fdf4', // green
+                    '#eff6ff', // blue
+                    '#fefce8', // yellow
+                    '#faf5ff', // purple
+                    '#fff1f2', // pink
+                    '#fed7aa', // orange
+                    '#e0f2fe', // sky
+                    '#fce7f3', // fuchsia
+                    '#dcfce7', // lime
+                    '#f5f3ff', // violet
+                    '#ffedd5', // amber
+                  ].map((color) => (
+                    <button
+                      key={color}
+                      onClick={() => setNewCategoryForm({ ...newCategoryForm, color })}
+                      className={`size-10 rounded-lg border-2 transition-all ${
+                        newCategoryForm.color === color ? 'border-primary scale-110' : 'border-transparent'
+                      }`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Icon Picker */}
+              <div>
+                <label className="text-xs font-bold text-text-muted mb-2 block">Icon</label>
+                <div className="grid grid-cols-6 gap-2">
+                  {[
+                    'favorite',
+                    'psychology',
+                    'auto_awesome',
+                    'fitness_center',
+                    'payments',
+                    'lightbulb',
+                    'school',
+                    'celebration',
+                    'psychiatry',
+                    'spa',
+                    'family_restroom',
+                    'work',
+                  ].map((icon) => (
+                    <button
+                      key={icon}
+                      onClick={() => setNewCategoryForm({ ...newCategoryForm, icon })}
+                      className={`size-10 rounded-lg flex items-center justify-center border-2 transition-all ${
+                        newCategoryForm.icon === icon
+                          ? 'border-primary bg-primary/10'
+                          : 'border-gray-200 dark:border-gray-700 hover:border-primary/50'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-base text-gray-800 dark:text-gray-200">{icon}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Preview */}
+              <div>
+                <label className="text-xs font-bold text-text-muted mb-2 block">Preview</label>
+                <div className="bg-background-light dark:bg-background-dark p-4 rounded-xl flex items-center gap-3">
+                  <div className="size-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: newCategoryForm.color }}>
+                    <span className="material-symbols-outlined text-gray-800 text-base">{newCategoryForm.icon}</span>
+                  </div>
+                  <div>
+                    <p className="text-base font-bold">{newCategoryForm.name || 'Category Name'}</p>
+                    <p className="text-xs text-text-muted">0 Verses</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 mt-6">
+              <button
+                onClick={() => {
+                  setShowNewCategoryModal(false);
+                  setNewCategoryForm({ name: '', color: '#fee2e2', icon: 'favorite' });
+                }}
+                className="flex-1 px-4 py-2.5 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateCategory}
+                disabled={!newCategoryForm.name.trim()}
+                className="flex-1 px-4 py-2.5 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Create Category
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Highlight Modal */}
+      {showDeleteHighlightModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-sm w-full p-6">
+            <div className="text-center mb-6">
+              <div className="size-16 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center mx-auto mb-4">
+                <span className="material-symbols-outlined text-3xl text-red-600">delete</span>
+              </div>
+              <h3 className="text-lg font-black mb-2">Delete Highlight?</h3>
+              <p className="text-sm text-text-muted">This action cannot be undone. The highlight will be permanently removed.</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setShowDeleteHighlightModal(false);
+                  setHighlightToDelete(null);
+                }}
+                className="flex-1 px-4 py-2.5 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteHighlight}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Favorite Modal */}
+      {showDeleteFavoriteModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-sm w-full p-6">
+            <div className="text-center mb-6">
+              <div className="size-16 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center mx-auto mb-4">
+                <span className="material-symbols-outlined text-3xl text-red-600">delete</span>
+              </div>
+              <h3 className="text-lg font-black mb-2">Delete Favorite?</h3>
+              <p className="text-sm text-text-muted">This verse will be removed from your favorites permanently.</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setShowDeleteFavoriteModal(false);
+                  setFavoriteToDelete(null);
+                }}
+                className="flex-1 px-4 py-2.5 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteFavorite}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Note Modal */}
+      {showDeleteNoteModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-sm w-full p-6">
+            <div className="text-center mb-6">
+              <div className="size-16 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center mx-auto mb-4">
+                <span className="material-symbols-outlined text-3xl text-red-600">delete</span>
+              </div>
+              <h3 className="text-lg font-black mb-2">Delete Note?</h3>
+              <p className="text-sm text-text-muted">This note will be permanently deleted and cannot be recovered.</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setShowDeleteNoteModal(false);
+                  setNoteToDelete(null);
+                }}
+                className="flex-1 px-4 py-2.5 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteNote}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Category Modal */}
+      {showDeleteCategoryModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-sm w-full p-6">
+            <div className="text-center mb-6">
+              <div className="size-16 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center mx-auto mb-4">
+                <span className="material-symbols-outlined text-3xl text-red-600">delete</span>
+              </div>
+              <h3 className="text-lg font-black mb-2">Delete Category?</h3>
+              <p className="text-sm text-text-muted">This category will be removed from all tagged verses. This action cannot be undone.</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setShowDeleteCategoryModal(false);
+                  setCategoryToDelete(null);
+                }}
+                className="flex-1 px-4 py-2.5 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteCategory}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 

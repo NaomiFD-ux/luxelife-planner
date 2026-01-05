@@ -1,6 +1,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useEvents } from '../contexts/EventsContext';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { db } from '../firebase/firebaseConfig';
+import { useAuth } from '../contexts/AuthContext';
 
 type SchoolSubView = 'dashboard' | 'calendar' | 'classes' | 'assignments' | 'settings';
 type AssignmentType = 'assignment' | 'quiz' | 'exam' | 'project' | 'discussion' | 'presentation';
@@ -43,7 +46,9 @@ interface AssignmentItem {
 
 const SchoolHub: React.FC = () => {
   const { addEvent, updateEvent, deleteEventsBySource, events } = useEvents();
+  const { user } = useAuth();
   const [currentView, setCurrentView] = useState<SchoolSubView>('dashboard');
+  const [loading, setLoading] = useState(true);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'overview' | 'assignments' | 'syllabus' | 'sessions'>('overview');
   const [dashboardFilter, setDashboardFilter] = useState<'today' | 'assignments' | 'exams' | 'projects'>('today');
@@ -57,29 +62,66 @@ const SchoolHub: React.FC = () => {
   const [editMenuOpen, setEditMenuOpen] = useState<string | null>(null);
   const [editClassModalOpen, setEditClassModalOpen] = useState(false);
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
+  const [showDeleteAssignmentModal, setShowDeleteAssignmentModal] = useState(false);
+  const [assignmentToDelete, setAssignmentToDelete] = useState<string | null>(null);
+  const [showDeleteClassModal, setShowDeleteClassModal] = useState(false);
+  const [classToDelete, setClassToDelete] = useState<string | null>(null);
+
+  // Session timer state
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [sessionDuration, setSessionDuration] = useState(25); // minutes
+  const [timeRemaining, setTimeRemaining] = useState(25 * 60); // seconds
+  const [showTimerSettings, setShowTimerSettings] = useState(false);
 
   // View context for Calendar
   const [viewDate, setViewDate] = useState(new Date(2023, 9, 1)); // October 2023
 
-  // Unified classes source of truth
-  const [classList, setClassList] = useState<Class[]>([
-    { id: 'c1', termId: 't1', name: 'Modern UI/UX Architecture', code: 'DES 401', instructor: 'Dr. Aris Thorne', format: 'hybrid', location: 'Hall 4-B', color: '#0ea5e9', currentGrade: 94.2, targetCompletionDate: '2023-12-15' },
-    { id: 'c2', termId: 't1', name: 'Advanced Algorithms', code: 'CS 502', instructor: 'Prof. Sarah Vance', format: 'online', color: '#8b5cf6', currentGrade: 88.5, targetCompletionDate: '2023-12-12' },
-    { id: 'c3', termId: 't1', name: 'Strategic Branding', code: 'BUS 305', instructor: 'Elena Rossi', format: 'on-campus', location: 'Business Ctr 2', color: '#f43f5e', currentGrade: 97.0, targetCompletionDate: '2023-12-20' }
-  ]);
+  // Unified classes source of truth - Firestore
+  const [classList, setClassList] = useState<Class[]>([]);
 
-  // Unified assignments source of truth
-  const [assignmentData, setAssignmentData] = useState<AssignmentItem[]>([
-    { id: 'a0', classId: 'c2', title: 'Problem Set #6', type: 'assignment', dueDate: '2023-10-20', status: 'not started', maxGrade: 20 },
-    { id: 'a1', classId: 'c1', title: 'Design System Documentation', type: 'project', dueDate: '2023-10-30', status: 'in progress', maxGrade: 100, weight: 25 },
-    { id: 'a2', classId: 'c1', title: 'Midterm Portfolio Review', type: 'exam', dueDate: '2023-10-25', status: 'not started', maxGrade: 100, weight: 30 },
-    { id: 'a3', classId: 'c2', title: 'Weekly Problem Set #7', type: 'assignment', dueDate: '2023-10-24', status: 'submitted', maxGrade: 20 },
-    { id: 'a4', classId: 'c3', title: 'Brand Identity Pitch', type: 'presentation', dueDate: '2023-11-05', status: 'not started', maxGrade: 100 },
-    { id: 'a5', classId: 'c2', title: 'Final Project Phase 1', type: 'project', dueDate: '2023-11-12', status: 'not started', maxGrade: 100 },
-    { id: 'a6', classId: 'c1', title: 'User Research Synthesis', type: 'assignment', dueDate: '2023-10-24', dueTime: '11:59 PM', status: 'not started', maxGrade: 50, weight: 15 },
-    { id: 'a7', classId: 'c3', title: 'Market Analysis Quiz', type: 'quiz', dueDate: '2023-10-26', status: 'not started', maxGrade: 50 },
-    { id: 'a8', classId: 'c1', title: 'Heuristic Evaluation', type: 'assignment', dueDate: '2023-10-27', status: 'not started', maxGrade: 40 },
-  ]);
+  // Unified assignments source of truth - Firestore
+  const [assignmentData, setAssignmentData] = useState<AssignmentItem[]>([]);
+
+  // Load classes from Firestore with real-time sync
+  useEffect(() => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    const q = query(collection(db, 'school_classes'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Class[];
+      setClassList(data);
+      localStorage.setItem('luxelife_school_classes', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading classes:', error);
+      const saved = localStorage.getItem('luxelife_school_classes');
+      if (saved) setClassList(JSON.parse(saved));
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load assignments from Firestore with real-time sync
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(collection(db, 'school_assignments'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as AssignmentItem[];
+      setAssignmentData(data);
+      setLoading(false);
+      localStorage.setItem('luxelife_school_assignments', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading assignments:', error);
+      const saved = localStorage.getItem('luxelife_school_assignments');
+      if (saved) setAssignmentData(JSON.parse(saved));
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   useEffect(() => {
     const handleSubNav = (e: any) => {
@@ -98,10 +140,11 @@ const SchoolHub: React.FC = () => {
     const schoolEvents = events.filter(e => e.source === 'school');
     schoolEvents.forEach(e => deleteEventsBySource(e.sourceId));
 
-    // Add current assignments as events
+    // Add current assignments as events (ONLY those with specific times)
     assignmentData.forEach(assignment => {
       const cls = classList.find(c => c.id === assignment.classId);
       if (!cls) return;
+      if (!assignment.dueTime) return; // ONLY sync assignments with specific times
 
       addEvent({
         title: assignment.title,
@@ -111,128 +154,283 @@ const SchoolHub: React.FC = () => {
         description: `${cls.name} - ${assignment.type}`,
         source: 'school',
         sourceId: assignment.id,
-        colorClass: 'text-blue-600',
-        bgClass: 'bg-blue-100',
+        colorClass: 'border-sky-600 text-sky-900 dark:text-sky-100',
+        bgClass: 'bg-sky-50 dark:bg-sky-950/30',
         location: cls.location,
-        allDay: !assignment.dueTime,
+        allDay: false, // All synced assignments have specific times
       });
     });
   }, [assignmentData, classList]);
 
-  const terms: SchoolTerm[] = [
-    { id: 't1', name: 'Fall 2023', startDate: '2023-09-01', endDate: '2023-12-15', status: 'active' }
-  ];
+  // Terms with Firestore persistence
+  const [terms, setTerms] = useState<SchoolTerm[]>([]);
 
-  const toggleStatus = (id: string) => {
-    setAssignmentData(prev => prev.map(a => {
-      if (a.id === id) {
-        const statuses: AssignmentStatus[] = ['not started', 'in progress', 'submitted', 'completed', 'graded'];
-        const nextIndex = (statuses.indexOf(a.status) + 1) % statuses.length;
-        const newStatus = statuses[nextIndex];
+  // Load terms from Firestore with real-time sync
+  useEffect(() => {
+    if (!user) return;
 
-        // Open grade modal if status becomes 'graded'
-        if (newStatus === 'graded') {
-          setGradeModalAssignment(id);
-          setGradeInput('');
-        }
+    const q = query(collection(db, 'school_terms'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as SchoolTerm[];
+      setTerms(data);
+      localStorage.setItem('luxelife_school_terms', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading terms:', error);
+      const saved = localStorage.getItem('luxelife_school_terms');
+      if (saved) setTerms(JSON.parse(saved));
+    });
 
-        return { ...a, status: newStatus };
-      }
-      return a;
-    }));
-  };
+    return () => unsubscribe();
+  }, [user]);
 
-  const toggleCompletion = (id: string, e?: React.MouseEvent) => {
-    e?.stopPropagation(); // Prevent triggering parent click events
-    setAssignmentData(prev => prev.map(a => {
-      if (a.id === id) {
-        const isCompleted = ['completed', 'graded', 'submitted'].includes(a.status);
-        return { ...a, status: isCompleted ? 'not started' : 'completed' };
-      }
-      return a;
-    }));
-  };
+  const toggleStatus = async (id: string) => {
+    if (!user) return;
 
-  const handleSubmitGrade = () => {
-    if (gradeModalAssignment && gradeInput) {
-      setAssignmentData(prev => prev.map(a =>
-        a.id === gradeModalAssignment
-          ? { ...a, grade: Number(gradeInput) }
-          : a
-      ));
-      setGradeModalAssignment(null);
+    const assignment = assignmentData.find(a => a.id === id);
+    if (!assignment) return;
+
+    const statuses: AssignmentStatus[] = ['not started', 'in progress', 'submitted', 'completed', 'graded'];
+    const nextIndex = (statuses.indexOf(assignment.status) + 1) % statuses.length;
+    const newStatus = statuses[nextIndex];
+
+    // Open grade modal if status becomes 'graded'
+    if (newStatus === 'graded') {
+      setGradeModalAssignment(id);
       setGradeInput('');
+    }
+
+    try {
+      await setDoc(doc(db, 'school_assignments', id), {
+        ...assignment,
+        status: newStatus,
+        userId: user.uid
+      });
+    } catch (error) {
+      console.error('Error updating assignment status:', error);
     }
   };
 
-  const handleDeleteAssignment = (id: string) => {
-    setAssignmentData(prev => prev.filter(a => a.id !== id));
-    setEditMenuOpen(null);
+  const toggleCompletion = async (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation(); // Prevent triggering parent click events
+    if (!user) return;
+
+    const assignment = assignmentData.find(a => a.id === id);
+    if (!assignment) return;
+
+    const isCompleted = ['completed', 'graded', 'submitted'].includes(assignment.status);
+    const newStatus = isCompleted ? 'not started' : 'completed';
+
+    try {
+      await setDoc(doc(db, 'school_assignments', id), {
+        ...assignment,
+        status: newStatus,
+        userId: user.uid
+      });
+    } catch (error) {
+      console.error('Error toggling assignment completion:', error);
+    }
   };
 
-  const handleUpdateDueDate = (id: string, newDate: string, newTime?: string) => {
-    setAssignmentData(prev => prev.map(a =>
-      a.id === id
-        ? { ...a, dueDate: newDate, dueTime: newTime }
-        : a
-    ));
+  const handleSubmitGrade = async () => {
+    if (!user || !gradeModalAssignment || !gradeInput) return;
+
+    const assignment = assignmentData.find(a => a.id === gradeModalAssignment);
+    if (!assignment) return;
+
+    try {
+      await setDoc(doc(db, 'school_assignments', gradeModalAssignment), {
+        ...assignment,
+        grade: Number(gradeInput),
+        userId: user.uid
+      });
+      setGradeModalAssignment(null);
+      setGradeInput('');
+    } catch (error) {
+      console.error('Error submitting grade:', error);
+    }
   };
 
-  const handleUpdateClass = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleDeleteAssignment = async (id: string) => {
+    if (!user) return;
+
+    try {
+      await deleteDoc(doc(db, 'school_assignments', id));
+      setEditMenuOpen(null);
+    } catch (error) {
+      console.error('Error deleting assignment:', error);
+    }
+  };
+
+  const handleDeleteClass = async (classId: string) => {
+    if (!user) return;
+
+    try {
+      // Remove the class
+      await deleteDoc(doc(db, 'school_classes', classId));
+
+      // Cascade delete: remove all assignments associated with this class
+      const classAssignments = assignmentData.filter(a => a.classId === classId);
+      await Promise.all(classAssignments.map(a => deleteDoc(doc(db, 'school_assignments', a.id))));
+
+      // If this was the selected class, return to dashboard
+      if (selectedClassId === classId) {
+        setSelectedClassId(null);
+        setCurrentView('dashboard');
+      }
+    } catch (error) {
+      console.error('Error deleting class:', error);
+    }
+  };
+
+  const handleUpdateDueDate = async (id: string, newDate: string, newTime?: string) => {
+    if (!user) return;
+
+    const assignment = assignmentData.find(a => a.id === id);
+    if (!assignment) return;
+
+    // Remove undefined fields before saving
+    const { dueTime: oldDueTime, ...restAssignment } = assignment;
+    const updatedAssignment = {
+      ...restAssignment,
+      dueDate: newDate,
+      userId: user.uid,
+      ...(newTime && { dueTime: newTime })
+    };
+
+    try {
+      await setDoc(doc(db, 'school_assignments', id), updatedAssignment);
+    } catch (error) {
+      console.error('Error updating due date:', error);
+    }
+  };
+
+  // Session timer handlers
+  const handleStartSession = () => {
+    setIsTimerRunning(true);
+  };
+
+  const handlePauseSession = () => {
+    setIsTimerRunning(false);
+  };
+
+  const handleResetSession = () => {
+    setIsTimerRunning(false);
+    setTimeRemaining(sessionDuration * 60);
+  };
+
+  const handleUpdateSessionDuration = (minutes: number) => {
+    setSessionDuration(minutes);
+    setTimeRemaining(minutes * 60);
+    setShowTimerSettings(false);
+  };
+
+  // Timer effect
+  useEffect(() => {
+    if (isTimerRunning && timeRemaining > 0) {
+      const interval = setInterval(() => {
+        setTimeRemaining(prev => {
+          if (prev <= 1) {
+            setIsTimerRunning(false);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      return () => clearInterval(interval);
+    }
+  }, [isTimerRunning, timeRemaining]);
+
+  const handleUpdateClass = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!user || !editingClassId) return;
+
+    const classToUpdate = classList.find(c => c.id === editingClassId);
+    if (!classToUpdate) return;
+
     const formData = new FormData(e.currentTarget);
     const instructorEmail = formData.get('instructorEmail') as string;
     const studyResources = formData.get('studyResources') as string;
 
-    setClassList(prev => prev.map(c =>
-      c.id === editingClassId
-        ? {
-            ...c,
-            instructorEmail: instructorEmail || c.instructorEmail,
-            studyResources: studyResources ? studyResources.split('\n').filter(r => r.trim()) : c.studyResources
-          }
-        : c
-    ));
-
-    setEditClassModalOpen(false);
-    setEditingClassId(null);
+    try {
+      await setDoc(doc(db, 'school_classes', editingClassId), {
+        ...classToUpdate,
+        instructorEmail: instructorEmail || (classToUpdate as any).instructorEmail,
+        studyResources: studyResources ? studyResources.split('\n').filter(r => r.trim()) : (classToUpdate as any).studyResources,
+        userId: user.uid
+      });
+      setEditClassModalOpen(false);
+      setEditingClassId(null);
+    } catch (error) {
+      console.error('Error updating class:', error);
+    }
   };
 
-  const handleEnrollClass = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleEnrollClass = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!user) return;
+
     const formData = new FormData(e.currentTarget);
+    const classId = `c${Date.now()}`;
+    const locationValue = formData.get('location') as string;
+    const targetDateValue = formData.get('targetDate') as string;
+
     const newClass: Class = {
-      id: `c${Date.now()}`,
+      id: classId,
       termId: 't1',
       name: formData.get('name') as string,
       code: formData.get('code') as string,
       instructor: formData.get('instructor') as string,
       format: formData.get('format') as any,
-      location: (formData.get('location') as string) || undefined,
       color: formData.get('color') as string,
       currentGrade: 100,
-      targetCompletionDate: formData.get('targetDate') as string
+      ...(locationValue && { location: locationValue }),
+      ...(targetDateValue && { targetCompletionDate: targetDateValue })
     };
-    setClassList(prev => [...prev, newClass]);
-    setIsEnrollModalOpen(false);
+
+    try {
+      await setDoc(doc(db, 'school_classes', classId), {
+        ...newClass,
+        userId: user.uid,
+        createdAt: new Date().toISOString()
+      });
+      setIsEnrollModalOpen(false);
+    } catch (error) {
+      console.error('Error enrolling in class:', error);
+    }
   };
 
-  const handleAddAssignment = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleAddAssignment = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!user) return;
+
     const formData = new FormData(e.currentTarget);
+    const assignmentId = `a${Date.now()}`;
+    const dueTimeValue = formData.get('dueTime') as string;
+    const weightValue = formData.get('weight') as string;
+
     const newAssignment: AssignmentItem = {
-      id: `a${Date.now()}`,
+      id: assignmentId,
       classId: formData.get('classId') as string,
       title: formData.get('title') as string,
       type: formData.get('type') as AssignmentType,
       dueDate: formData.get('dueDate') as string,
-      dueTime: formData.get('dueTime') as string || undefined,
       status: 'not started',
-      weight: formData.get('weight') ? Number(formData.get('weight')) : undefined,
-      maxGrade: 100
+      maxGrade: 100,
+      ...(dueTimeValue && { dueTime: dueTimeValue }),
+      ...(weightValue && { weight: Number(weightValue) })
     };
-    setAssignmentData(prev => [...prev, newAssignment]);
-    setIsAddAssignmentModalOpen(false);
+
+    try {
+      await setDoc(doc(db, 'school_assignments', assignmentId), {
+        ...newAssignment,
+        userId: user.uid,
+        createdAt: new Date().toISOString()
+      });
+      setIsAddAssignmentModalOpen(false);
+    } catch (error) {
+      console.error('Error adding assignment:', error);
+    }
   };
 
   const AssignmentCard: React.FC<{ item: AssignmentItem, urgency: 'overdue' | 'today' | 'tomorrow' | 'upcoming' }> = ({ item, urgency }) => {
@@ -314,9 +512,9 @@ const SchoolHub: React.FC = () => {
                       </button>
                       <button
                         onClick={() => {
-                          if (confirm('Are you sure you want to delete this assignment?')) {
-                            handleDeleteAssignment(item.id);
-                          }
+                          setAssignmentToDelete(item.id);
+                          setShowDeleteAssignmentModal(true);
+                          setEditMenuOpen(null);
                         }}
                         className="w-full px-4 py-3 text-left text-sm font-bold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/10 transition-all flex items-center gap-2"
                       >
@@ -900,37 +1098,50 @@ const SchoolHub: React.FC = () => {
       );
     };
 
-    const WeekSection = () => (
-      <div 
-        ref={weekContainerRef}
-        className="flex-1 overflow-y-auto snap-y snap-mandatory scroll-smooth no-scrollbar h-[680px] animate-in slide-in-from-bottom-4 duration-700 bg-white dark:bg-surface-dark rounded-[48px] border border-gray-100 dark:border-gray-800 shadow-sm"
-      >
-        {Array.from({ length: 12 }).map((_, weekIndex) => {
-          const startDay = (weekIndex * 7) - 4;
-          return (
-            <div key={weekIndex} className="snap-start h-full min-h-full flex flex-col p-4 border-b border-gray-100 dark:border-gray-800 last:border-none">
-              <div className="px-8 py-6 flex items-center justify-between mb-2">
-                 <div>
-                   <h3 className="text-xl font-black tracking-tight text-text-main dark:text-white">Week Cycle {weekIndex + 1}</h3>
-                   <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest mt-1">Strategic Academic Window</p>
-                 </div>
-                 <div className="flex items-center gap-4">
-                    <span className="size-2 rounded-full bg-primary animate-ping"></span>
-                    <span className="text-[10px] font-black text-primary uppercase tracking-[0.4em]">Scroll to transition cycle</span>
-                 </div>
-              </div>
-              <div className="flex-1 grid grid-cols-7 gap-4">
-                {Array.from({ length: 7 }).map((_, dayIndex) => {
-                  const dayNum = startDay + dayIndex;
-                  const dateStr = `2023-10-${dayNum.toString().padStart(2, '0')}`;
-                  const dayAssignments = assignmentData.filter(a => a.dueDate === dateStr);
-                  const isToday = dateStr === todayStr;
+    const WeekSection = () => {
+      const year = viewDate.getFullYear();
+      const month = viewDate.getMonth();
+
+      return (
+        <div
+          ref={weekContainerRef}
+          className="flex-1 overflow-y-auto snap-y snap-mandatory scroll-smooth no-scrollbar h-[680px] animate-in slide-in-from-bottom-4 duration-700 bg-white dark:bg-surface-dark rounded-[48px] border border-gray-100 dark:border-gray-800 shadow-sm"
+        >
+          {Array.from({ length: 5 }).map((_, weekIndex) => {
+            const weekStartDate = new Date(year, month, 1 + (weekIndex * 7) - new Date(year, month, 1).getDay());
+
+            return (
+              <div key={weekIndex} className="snap-start h-full min-h-full flex flex-col p-4 border-b border-gray-100 dark:border-gray-800 last:border-none">
+                <div className="px-8 py-6 flex items-center justify-between mb-2">
+                   <div>
+                     <h3 className="text-xl font-black tracking-tight text-text-main dark:text-white">Week {weekIndex + 1}</h3>
+                     <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest mt-1">
+                       {weekStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(weekStartDate.getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                     </p>
+                   </div>
+                   <div className="flex items-center gap-4">
+                      <span className="size-2 rounded-full bg-primary animate-ping"></span>
+                      <span className="text-[10px] font-black text-primary uppercase tracking-[0.4em]">Scroll to transition</span>
+                   </div>
+                </div>
+                <div className="flex-1 grid grid-cols-7 gap-4">
+                  {Array.from({ length: 7 }).map((_, dayIndex) => {
+                    const currentDate = new Date(weekStartDate.getTime() + dayIndex * 24 * 60 * 60 * 1000);
+                    const dayNum = currentDate.getDate();
+                    const currentMonth = currentDate.getMonth();
+                    const currentYear = currentDate.getFullYear();
+                    const dateStr = `${currentYear}-${(currentMonth + 1).toString().padStart(2, '0')}-${dayNum.toString().padStart(2, '0')}`;
+                    const dayAssignments = assignmentData.filter(a => a.dueDate === dateStr);
+                    const isToday = dateStr === todayStr;
+                    const isDifferentMonth = currentMonth !== month;
 
                   return (
-                    <div key={dayIndex} className={`rounded-[32px] p-6 border border-gray-50 dark:border-gray-800 shadow-sm flex flex-col gap-6 transition-all hover:shadow-xl hover:border-primary/20 bg-background-light dark:bg-background-dark ${isToday ? 'ring-2 ring-primary bg-primary/5 shadow-primary/10' : ''}`}>
+                    <div key={dayIndex} className={`rounded-[32px] p-6 border border-gray-50 dark:border-gray-800 shadow-sm flex flex-col gap-6 transition-all hover:shadow-xl hover:border-primary/20 bg-background-light dark:bg-background-dark ${isToday ? 'ring-2 ring-primary bg-primary/5 shadow-primary/10' : ''} ${isDifferentMonth ? 'opacity-40' : ''}`}>
                        <div className="flex flex-col gap-1">
-                          <span className={`text-[10px] font-black uppercase tracking-widest ${isToday ? 'text-primary' : 'text-text-muted'}`}>{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][dayIndex]}</span>
-                          <span className="text-3xl font-black text-text-main dark:text-white">{dayNum > 0 && dayNum <= 31 ? dayNum : ''}</span>
+                          <span className={`text-[10px] font-black uppercase tracking-widest ${isToday ? 'text-primary' : 'text-text-muted'}`}>
+                            {currentDate.toLocaleDateString('en-US', { weekday: 'short' })}
+                          </span>
+                          <span className={`text-3xl font-black ${isDifferentMonth ? 'text-text-muted' : 'text-text-main dark:text-white'}`}>{dayNum}</span>
                        </div>
                        <div className="flex-1 flex flex-col gap-3">
                           {dayAssignments.length > 0 ? dayAssignments.map(a => {
@@ -969,6 +1180,7 @@ const SchoolHub: React.FC = () => {
         })}
       </div>
     );
+    };
 
     const ListSection = () => (
       <div className="flex-1 flex flex-col gap-10 animate-in fade-in duration-500">
@@ -1201,7 +1413,7 @@ const SchoolHub: React.FC = () => {
   const ClassesListView = () => (
     <div className="flex flex-col gap-10 animate-in fade-in duration-700">
        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
-        <div><h2 className="text-3xl font-black tracking-tight text-text-main dark:text-white">Academic Portfolio</h2><p className="text-text-muted mt-2 font-medium">Managing your workload across {terms[0].name}.</p></div>
+        <div><h2 className="text-3xl font-black tracking-tight text-text-main dark:text-white">Academic Portfolio</h2><p className="text-text-muted mt-2 font-medium">Managing your workload across {terms[0]?.name || 'your term'}.</p></div>
         <button 
           onClick={() => setIsEnrollModalOpen(true)}
           className="bg-primary text-white px-8 py-3 rounded-2xl font-bold shadow-lg shadow-primary/20 flex items-center gap-2 hover:scale-[1.02] transition-transform"
@@ -1211,14 +1423,27 @@ const SchoolHub: React.FC = () => {
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
          {classList.map((cls) => (
-           <div key={cls.id} onClick={() => setSelectedClassId(cls.id)} className="bg-white dark:bg-surface-dark rounded-[48px] p-10 border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all cursor-pointer group flex flex-col justify-between h-[450px]">
+           <div key={cls.id} onClick={() => setSelectedClassId(cls.id)} className="bg-white dark:bg-surface-dark rounded-[48px] p-10 border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all cursor-pointer group flex flex-col justify-between h-[450px] relative">
               <div>
                 <div className="flex justify-between items-start mb-10">
                   <div className="size-16 rounded-[24px] flex items-center justify-center text-white shadow-lg" style={{ backgroundColor: cls.color }}>
                     <span className="material-symbols-outlined text-3xl">book_5</span>
                   </div>
                   <div className="flex flex-col items-end gap-1">
-                    <span className="text-[10px] font-black text-text-muted uppercase tracking-[0.3em]">{cls.code}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black text-text-muted uppercase tracking-[0.3em]">{cls.code}</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setClassToDelete(cls.id);
+                          setShowDeleteClassModal(true);
+                        }}
+                        className="size-8 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 flex items-center justify-center text-text-muted hover:text-red-600 transition-all opacity-0 group-hover:opacity-100"
+                        title="Delete class"
+                      >
+                        <span className="material-symbols-outlined text-base">delete</span>
+                      </button>
+                    </div>
                     {cls.targetCompletionDate && <span className="text-[8px] font-black text-primary uppercase tracking-widest">Targets {cls.targetCompletionDate}</span>}
                   </div>
                 </div>
@@ -1342,17 +1567,39 @@ const SchoolHub: React.FC = () => {
                          return (
                          <div key={a.id} className="p-6 rounded-[32px] bg-background-light dark:bg-background-dark border border-gray-50 dark:border-gray-800 flex items-center justify-between group hover:border-primary/20 transition-all">
                             <div className="flex items-center gap-6">
-                              <div className="size-5 rounded-full border-2 border-primary/20 flex items-center justify-center">
+                              <button
+                                onClick={() => {
+                                  // Toggle between not started/in progress and submitted
+                                  setAssignmentData(prev => prev.map(assignment =>
+                                    assignment.id === a.id
+                                      ? { ...assignment, status: isCompleted ? 'not started' : 'submitted' }
+                                      : assignment
+                                  ));
+                                }}
+                                className="size-5 rounded-full border-2 border-primary/20 flex items-center justify-center hover:bg-primary/10 hover:border-primary transition-all cursor-pointer"
+                              >
                                 {isCompleted && <span className="material-symbols-outlined text-[10px] text-primary">check</span>}
-                              </div>
+                              </button>
                               <div>
                                 <h4 className={`font-bold text-text-main dark:text-white ${isCompleted ? 'line-through opacity-50' : ''}`}>{a.title}</h4>
                                 <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest">{a.type} • Worth {a.weight}%</p>
                               </div>
                             </div>
-                            <div className="text-right">
-                              <p className="text-xs font-black text-primary uppercase tracking-widest">Due {a.dueDate}</p>
-                              <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest mt-1">{a.status}</p>
+                            <div className="flex items-center gap-4">
+                              <div className="text-right">
+                                <p className="text-xs font-black text-primary uppercase tracking-widest">Due {a.dueDate}</p>
+                                <p className="text-[10px] font-bold text-text-muted uppercase tracking-widest mt-1">{a.status}</p>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setAssignmentToDelete(a.id);
+                                  setShowDeleteAssignmentModal(true);
+                                }}
+                                className="size-9 rounded-xl bg-background-light dark:bg-background-dark border border-gray-100 dark:border-gray-800 flex items-center justify-center text-text-muted hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all opacity-0 group-hover:opacity-100"
+                                title="Delete assignment"
+                              >
+                                <span className="material-symbols-outlined text-base">delete</span>
+                              </button>
                             </div>
                          </div>
                        )})}
@@ -1370,15 +1617,75 @@ const SchoolHub: React.FC = () => {
                     </div>
                  </div>
                )}
-               {activeWorkspaceTab === 'sessions' && (
-                 <div className="flex flex-col gap-8 animate-in slide-in-from-bottom-4">
-                    <div className="bg-white dark:bg-surface-dark p-12 rounded-[48px] border border-gray-100 dark:border-gray-800 shadow-xl flex flex-col items-center text-center">
+               {activeWorkspaceTab === 'sessions' && (() => {
+                 const minutes = Math.floor(timeRemaining / 60);
+                 const seconds = timeRemaining % 60;
+                 const displayTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                 const totalSeconds = sessionDuration * 60;
+                 const progress = ((totalSeconds - timeRemaining) / totalSeconds) * 100;
+                 const circumference = 2 * Math.PI * 45;
+                 const strokeDashoffset = circumference - (progress / 100) * circumference;
+
+                 return (
+                   <div className="flex flex-col gap-8 animate-in slide-in-from-bottom-4">
+                     <div className="bg-white dark:bg-surface-dark p-12 rounded-[48px] border border-gray-100 dark:border-gray-800 shadow-xl flex flex-col items-center text-center">
                        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-text-muted mb-10">Study Focus Timer</p>
-                       <div className="relative size-64 mb-10"><svg className="size-full -rotate-90" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="6" className="text-gray-100 dark:text-gray-800" /><circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="6" strokeDasharray="282.6" strokeDashoffset="70" strokeLinecap="round" className="text-primary" /></svg><div className="absolute inset-0 flex items-center justify-center flex-col"><span className="text-6xl font-black tracking-tighter text-text-main dark:text-white">25:00</span><span className="text-[10px] font-bold text-primary uppercase tracking-widest mt-2">Pomodoro Mode</span></div></div>
-                       <div className="flex gap-4"><button className="px-10 py-4 bg-primary text-white rounded-2xl font-black text-sm shadow-xl shadow-primary/30">Start Session</button><button className="px-10 py-4 bg-background-light dark:bg-background-dark border border-gray-100 dark:border-gray-800 rounded-2xl font-black text-sm">Settings</button></div>
-                    </div>
-                 </div>
-               )}
+                       <div className="relative size-64 mb-10">
+                         <svg className="size-full -rotate-90" viewBox="0 0 100 100">
+                           <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="6" className="text-gray-100 dark:text-gray-800" />
+                           <circle
+                             cx="50"
+                             cy="50"
+                             r="45"
+                             fill="none"
+                             stroke="currentColor"
+                             strokeWidth="6"
+                             strokeDasharray={circumference}
+                             strokeDashoffset={strokeDashoffset}
+                             strokeLinecap="round"
+                             className="text-primary transition-all duration-1000"
+                           />
+                         </svg>
+                         <div className="absolute inset-0 flex items-center justify-center flex-col">
+                           <span className="text-6xl font-black tracking-tighter text-text-main dark:text-white">{displayTime}</span>
+                           <span className="text-[10px] font-bold text-primary uppercase tracking-widest mt-2">
+                             {timeRemaining === 0 ? 'Complete!' : isTimerRunning ? 'In Progress' : 'Pomodoro Mode'}
+                           </span>
+                         </div>
+                       </div>
+                       <div className="flex gap-4">
+                         {!isTimerRunning ? (
+                           <button
+                             onClick={handleStartSession}
+                             className="px-10 py-4 bg-primary text-white rounded-2xl font-black text-sm shadow-xl shadow-primary/30 hover:scale-105 transition-transform"
+                           >
+                             {timeRemaining === 0 || timeRemaining === sessionDuration * 60 ? 'Start Session' : 'Resume'}
+                           </button>
+                         ) : (
+                           <button
+                             onClick={handlePauseSession}
+                             className="px-10 py-4 bg-amber-500 text-white rounded-2xl font-black text-sm shadow-xl shadow-amber-500/30 hover:scale-105 transition-transform"
+                           >
+                             Pause
+                           </button>
+                         )}
+                         <button
+                           onClick={handleResetSession}
+                           className="px-10 py-4 bg-background-light dark:bg-background-dark border border-gray-100 dark:border-gray-800 rounded-2xl font-black text-sm hover:border-primary transition-all"
+                         >
+                           Reset
+                         </button>
+                         <button
+                           onClick={() => setShowTimerSettings(true)}
+                           className="px-10 py-4 bg-background-light dark:bg-background-dark border border-gray-100 dark:border-gray-800 rounded-2xl font-black text-sm hover:border-primary transition-all"
+                         >
+                           Settings
+                         </button>
+                       </div>
+                     </div>
+                   </div>
+                 );
+               })()}
             </div>
             <div className="lg:col-span-4 flex flex-col gap-8">
                <div className="bg-white dark:bg-surface-dark p-10 rounded-[40px] border border-gray-100 dark:border-gray-800 shadow-sm"><h3 className="text-lg font-bold mb-6 text-text-main dark:text-white">Instructor Contact</h3><div className="flex items-center gap-4 mb-8"><div className="size-12 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-text-muted"><span className="material-symbols-outlined">person</span></div><div><p className="text-sm font-bold text-text-main dark:text-white">{cls.instructor}</p><p className="text-[10px] font-bold text-text-muted">Faculty of Architecture</p></div></div><div className="space-y-4"><button className="w-full py-3 bg-background-light dark:bg-background-dark rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-primary/10 hover:text-primary transition-all"><span className="material-symbols-outlined text-sm">mail</span> Email Instructor</button><button className="w-full py-3 bg-background-light dark:bg-background-dark rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-primary/10 hover:text-primary transition-all"><span className="material-symbols-outlined text-sm">calendar_month</span> Office Hours</button></div></div>
@@ -1504,12 +1811,166 @@ const SchoolHub: React.FC = () => {
     );
   };
 
+  const DeleteAssignmentModal = () => {
+    const assignment = assignmentData.find(a => a.id === assignmentToDelete);
+    if (!assignment) return null;
+
+    const cls = classList.find(c => c.id === assignment.classId);
+
+    return (
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-sm w-full p-6">
+          <div className="text-center mb-6">
+            <div className="size-16 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center mx-auto mb-4">
+              <span className="material-symbols-outlined text-3xl text-red-600">delete</span>
+            </div>
+            <h3 className="text-lg font-black mb-2">Delete Assignment?</h3>
+            <p className="text-sm text-text-muted mb-3">
+              This will permanently delete <span className="font-bold text-text-main dark:text-white">"{assignment.title}"</span> from {cls?.name || 'your class'}.
+            </p>
+            <p className="text-sm text-text-muted">
+              This assignment will also be removed from your calendar. This action cannot be undone.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setShowDeleteAssignmentModal(false);
+                setAssignmentToDelete(null);
+              }}
+              className="flex-1 px-4 py-2.5 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (assignmentToDelete) {
+                  handleDeleteAssignment(assignmentToDelete);
+                  setShowDeleteAssignmentModal(false);
+                  setAssignmentToDelete(null);
+                }
+              }}
+              className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const DeleteClassModal = () => {
+    const cls = classList.find(c => c.id === classToDelete);
+    if (!cls) return null;
+
+    const associatedAssignments = assignmentData.filter(a => a.classId === classToDelete);
+    const assignmentCount = associatedAssignments.length;
+
+    return (
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-sm w-full p-6">
+          <div className="text-center mb-6">
+            <div className="size-16 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center mx-auto mb-4">
+              <span className="material-symbols-outlined text-3xl text-red-600">delete</span>
+            </div>
+            <h3 className="text-lg font-black mb-2">Delete Class?</h3>
+            <p className="text-sm text-text-muted mb-3">
+              This will permanently delete <span className="font-bold text-text-main dark:text-white">{cls.code} - {cls.name}</span>.
+            </p>
+            {assignmentCount > 0 && (
+              <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 rounded-xl p-3 mb-3">
+                <p className="text-sm font-bold text-amber-900 dark:text-amber-200">
+                  ⚠️ {assignmentCount} assignment{assignmentCount !== 1 ? 's' : ''} will also be deleted
+                </p>
+              </div>
+            )}
+            <p className="text-sm text-text-muted">
+              All associated assignments will be removed from your calendar. This action cannot be undone.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setShowDeleteClassModal(false);
+                setClassToDelete(null);
+              }}
+              className="flex-1 px-4 py-2.5 bg-background-light dark:bg-background-dark rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (classToDelete) {
+                  handleDeleteClass(classToDelete);
+                  setShowDeleteClassModal(false);
+                  setClassToDelete(null);
+                }
+              }}
+              className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const TimerSettingsModal = () => {
+    const durations = [15, 25, 30, 45, 60, 90];
+
+    return (
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-md w-full p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-black">Timer Settings</h3>
+            <button
+              onClick={() => setShowTimerSettings(false)}
+              className="size-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark flex items-center justify-center"
+            >
+              <span className="material-symbols-outlined text-sm">close</span>
+            </button>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-text-muted mb-3 block">Session Duration</label>
+            <div className="grid grid-cols-3 gap-3">
+              {durations.map((duration) => (
+                <button
+                  key={duration}
+                  onClick={() => handleUpdateSessionDuration(duration)}
+                  className={`p-4 rounded-xl font-bold text-sm transition-all ${
+                    sessionDuration === duration
+                      ? 'bg-primary text-white shadow-lg shadow-primary/30'
+                      : 'bg-background-light dark:bg-background-dark hover:bg-primary/10 hover:border-primary'
+                  }`}
+                >
+                  {duration} min
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-xl">
+            <p className="text-xs text-blue-900 dark:text-blue-200">
+              💡 <span className="font-bold">Tip:</span> The Pomodoro Technique recommends 25-minute focus sessions for optimal productivity.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="h-full relative">
       {isEnrollModalOpen && <EnrollClassModal />}
       {isAddAssignmentModalOpen && <AddAssignmentModal />}
       {gradeModalAssignment && <GradeEntryModal />}
       {editClassModalOpen && <EditClassModal />}
+      {showDeleteAssignmentModal && <DeleteAssignmentModal />}
+      {showDeleteClassModal && <DeleteClassModal />}
+      {showTimerSettings && <TimerSettingsModal />}
       {renderContent()}
     </div>
   );

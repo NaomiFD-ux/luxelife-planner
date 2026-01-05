@@ -53,7 +53,15 @@ const TopBar: React.FC = () => {
               <span className="text-xs font-bold leading-none">{user.name}</span>
               <span className="text-[9px] text-text-muted font-bold tracking-wider uppercase mt-0.5">{user.plan}</span>
             </div>
-            <img src={user.avatar} alt="User" className="size-9 rounded-full object-cover ring-2 ring-transparent group-hover:ring-primary transition-all" />
+            {user.avatar ? (
+              <img src={user.avatar} alt="User" className="size-9 rounded-full object-cover ring-2 ring-transparent group-hover:ring-primary transition-all" />
+            ) : (
+              <div className="size-9 rounded-full bg-primary/20 ring-2 ring-transparent group-hover:ring-primary transition-all flex items-center justify-center">
+                <span className="text-xs font-black text-primary">
+                  {user.name ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'U'}
+                </span>
+              </div>
+            )}
           </button>
         </div>
       </header>

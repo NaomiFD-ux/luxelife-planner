@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { useEvents } from '../contexts/EventsContext';
+import { useEvents, UnifiedEvent } from '../contexts/EventsContext';
 
 // ===== TYPES =====
 enum CalendarMode {
@@ -20,15 +20,7 @@ interface CalendarEvent {
   description?: string;
   colorClass: string;
   bgClass: string;
-}
-
-interface Task {
-  id: string;
-  title: string;
-  category: string;
-  timeRemaining: string;
-  startTime: string;
-  endTime: string;
+  startDate?: string; // YYYY-MM-DD (for month view matching)
 }
 
 // ===== CONSTANTS =====
@@ -47,88 +39,7 @@ const TIME_SLOTS = [
   '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
 ];
 
-const INITIAL_EVENTS: CalendarEvent[] = [
-  {
-    id: '1',
-    title: 'Team Sync',
-    startTime: '09:00',
-    endTime: '10:30',
-    dayIndex: 0,
-    category: 'Work',
-    colorClass: 'border-blue-500 text-blue-900',
-    bgClass: 'bg-blue-50 dark:bg-blue-950/30'
-  },
-  {
-    id: '2',
-    title: 'Lunch w/ Sarah',
-    startTime: '12:30',
-    endTime: '13:30',
-    dayIndex: 1,
-    category: 'Personal',
-    colorClass: 'border-pink-500 text-pink-900 dark:text-pink-100',
-    bgClass: 'bg-pink-50 dark:bg-pink-950/30'
-  },
-  {
-    id: '3',
-    title: 'Product Design Workshop',
-    startTime: '10:00',
-    endTime: '12:00',
-    dayIndex: 2,
-    category: 'Work',
-    colorClass: 'border-purple-500 text-purple-900 dark:text-purple-100',
-    bgClass: 'bg-purple-50 dark:bg-purple-950/30'
-  },
-  {
-    id: '4',
-    title: 'Yoga Class',
-    startTime: '14:00',
-    endTime: '15:15',
-    dayIndex: 2,
-    category: 'Fitness',
-    colorClass: 'border-green-500 text-green-900 dark:text-green-100',
-    bgClass: 'bg-green-50 dark:bg-green-950/30'
-  },
-  {
-    id: '5',
-    title: 'Focus Time',
-    startTime: '15:30',
-    endTime: '17:00',
-    dayIndex: 3,
-    category: 'Work',
-    colorClass: 'border-orange-400 text-orange-900 dark:text-orange-100',
-    bgClass: 'bg-orange-50 dark:bg-orange-950/30',
-    description: 'Write weekly report...'
-  },
-  {
-    id: '6',
-    title: 'Wrap Up',
-    startTime: '17:00',
-    endTime: '17:45',
-    dayIndex: 4,
-    category: 'Work',
-    colorClass: 'border-blue-500 text-blue-900 dark:text-blue-100',
-    bgClass: 'bg-blue-50 dark:bg-blue-950/30'
-  }
-];
-
-const MOCK_TASKS: Task[] = [
-  {
-    id: 't1',
-    title: 'Review UX Case Study',
-    category: 'Study',
-    timeRemaining: 'In 30m',
-    startTime: '14:00',
-    endTime: '15:00'
-  },
-  {
-    id: 't2',
-    title: 'Q4 Planning Meeting',
-    category: 'Work',
-    timeRemaining: 'Tomorrow',
-    startTime: '09:00',
-    endTime: '10:30'
-  }
-];
+// INITIAL_EVENTS and MOCK_TASKS removed - now using real events from EventsContext
 
 // ===== HELPER FUNCTION =====
 const formatTime = (time24: string): string => {
@@ -462,17 +373,24 @@ const DayView: React.FC<DayViewProps> = ({ events, activeDayIndex, currentDate, 
 // ===== MONTH VIEW COMPONENT =====
 interface MonthViewProps {
   events: CalendarEvent[];
+  selectedMonth: number; // 0-11
+  selectedYear: number;
 }
 
-const MonthView: React.FC<MonthViewProps> = ({ events }) => {
-  const days = Array.from({ length: 31 }, (_, i) => i + 1);
+const MonthView: React.FC<MonthViewProps> = ({ events, selectedMonth, selectedYear }) => {
+  // Calculate actual days in the selected month
+  const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
+  const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
   const weekDays = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 
   const getEventsForDay = (day: number) => {
-    if (day === 6) return events.filter(e => e.dayIndex === 0);
-    if (day === 7) return events.filter(e => e.dayIndex === 1);
-    if (day === 8) return events.filter(e => e.dayIndex === 2);
-    return [];
+    // Build the date string for this day (YYYY-MM-DD)
+    const month = (selectedMonth + 1).toString().padStart(2, '0');
+    const dayStr = day.toString().padStart(2, '0');
+    const dateStr = `${selectedYear}-${month}-${dayStr}`;
+
+    // Filter events that match this exact date
+    return events.filter(e => e.startDate === dateStr);
   };
 
   return (
@@ -569,7 +487,11 @@ const YearView: React.FC<YearViewProps> = ({ onMonthClick }) => {
 };
 
 // ===== RIGHT SIDEBAR COMPONENT =====
-const RightSidebar: React.FC = () => {
+interface RightSidebarProps {
+  events: UnifiedEvent[];
+}
+
+const RightSidebar: React.FC<RightSidebarProps> = ({ events }) => {
   const today = new Date();
   const [miniMonth, setMiniMonth] = useState(today.getMonth());
   const [miniYear, setMiniYear] = useState(today.getFullYear());
@@ -678,24 +600,34 @@ const RightSidebar: React.FC = () => {
           <button className="text-primary text-xs font-bold hover:underline">Edit</button>
         </div>
         <div className="space-y-2">
-          {[
-            { label: 'Work', count: 8, color: 'bg-blue-500', border: 'border-blue-500' },
-            { label: 'Personal', count: 3, color: 'bg-primary', border: 'border-primary', checked: true },
-            { label: 'Study', count: 2, color: 'bg-purple-500', border: 'border-purple-500' },
-            { label: 'Fitness', count: 1, color: 'bg-white', border: 'border-green-500' },
-          ].map((cat, i) => (
-            <div key={i} className="flex items-center justify-between p-3 rounded-2xl hover:bg-white dark:hover:bg-surface-dark transition-all cursor-pointer group hover:shadow-sm">
-              <div className="flex items-center gap-3">
-                <div className={`size-5 rounded-md border-2 ${cat.border} ${cat.checked || cat.color !== 'bg-white' ? cat.color : ''} flex items-center justify-center transition-colors`}>
-                  {(cat.checked || cat.color !== 'bg-white') && <span className="material-symbols-outlined text-white text-[12px] font-bold">check</span>}
+          {(() => {
+            // Count events by category
+            const categoryCounts = events.reduce((acc, event) => {
+              acc[event.category] = (acc[event.category] || 0) + 1;
+              return acc;
+            }, {} as Record<string, number>);
+
+            const categories = [
+              { label: 'Work', count: categoryCounts['Work'] || 0, color: 'bg-blue-500', border: 'border-blue-500' },
+              { label: 'Personal', count: categoryCounts['Personal'] || 0, color: 'bg-primary', border: 'border-primary', checked: true },
+              { label: 'Study', count: categoryCounts['Study'] || 0, color: 'bg-purple-500', border: 'border-purple-500' },
+              { label: 'Fitness', count: categoryCounts['Fitness'] || 0, color: 'bg-rose-500', border: 'border-rose-500' },
+            ];
+
+            return categories.map((cat, i) => (
+              <div key={i} className="flex items-center justify-between p-3 rounded-2xl hover:bg-white dark:hover:bg-surface-dark transition-all cursor-pointer group hover:shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className={`size-5 rounded-md border-2 ${cat.border} ${cat.checked || cat.color !== 'bg-white' ? cat.color : ''} flex items-center justify-center transition-colors`}>
+                    {(cat.checked || cat.color !== 'bg-white') && <span className="material-symbols-outlined text-white text-[12px] font-bold">check</span>}
+                  </div>
+                  <span className="text-sm font-bold text-text-main dark:text-white group-hover:text-primary transition-colors">{cat.label}</span>
                 </div>
-                <span className="text-sm font-bold text-text-main dark:text-white group-hover:text-primary transition-colors">{cat.label}</span>
+                <span className="text-[10px] font-black text-text-muted bg-white dark:bg-surface-dark px-2 py-0.5 rounded-lg border border-gray-100 dark:border-gray-800 group-hover:border-primary/20 transition-all">
+                  {cat.count}
+                </span>
               </div>
-              <span className="text-[10px] font-black text-text-muted bg-white dark:bg-surface-dark px-2 py-0.5 rounded-lg border border-gray-100 dark:border-gray-800 group-hover:border-primary/20 transition-all">
-                {cat.count}
-              </span>
-            </div>
-          ))}
+            ));
+          })()}
         </div>
       </div>
 
@@ -708,25 +640,75 @@ const RightSidebar: React.FC = () => {
           </button>
         </div>
         <div className="flex flex-col gap-4">
-          {MOCK_TASKS.map((task) => (
-            <div key={task.id} className="bg-white dark:bg-surface-dark p-5 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 hover:border-primary/30 transition-all cursor-pointer group">
-              <div className="flex justify-between items-start mb-3">
-                <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${
-                  task.category === 'Study' ? 'bg-purple-50 dark:bg-purple-950/30 text-purple-600 dark:text-purple-400' : 'bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400'
-                }`}>
-                  {task.category}
-                </span>
-                <span className="text-[10px] text-text-muted font-bold">{task.timeRemaining}</span>
+          {(() => {
+            const now = new Date();
+            const nowDateStr = now.toISOString().split('T')[0];
+            const nowTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+            // Get upcoming events (today or future, and not yet passed)
+            const upcomingEvents = events
+              .filter(e => {
+                if (!e.startTime) return false; // Skip all-day events
+                if (e.startDate > nowDateStr) return true; // Future dates
+                if (e.startDate === nowDateStr && e.startTime >= nowTime) return true; // Today, not yet started
+                return false;
+              })
+              .sort((a, b) => {
+                // Sort by date, then by time
+                if (a.startDate !== b.startDate) return a.startDate.localeCompare(b.startDate);
+                return (a.startTime || '').localeCompare(b.startTime || '');
+              })
+              .slice(0, 5); // Show max 5 upcoming events
+
+            // Helper to calculate time remaining
+            const getTimeRemaining = (eventDate: string, eventTime: string) => {
+              const eventDateTime = new Date(`${eventDate}T${eventTime}`);
+              const diffMs = eventDateTime.getTime() - now.getTime();
+              const diffMins = Math.floor(diffMs / 60000);
+              const diffHours = Math.floor(diffMins / 60);
+              const diffDays = Math.floor(diffHours / 24);
+
+              if (diffMins < 60) return `In ${diffMins}m`;
+              if (diffHours < 24) return `In ${diffHours}h`;
+              if (diffDays === 1) return 'Tomorrow';
+              if (diffDays < 7) return `In ${diffDays} days`;
+              return eventDate;
+            };
+
+            // Helper to get category color classes
+            const getCategoryStyles = (category: string) => {
+              switch (category) {
+                case 'Work': return 'bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400';
+                case 'Study': return 'bg-purple-50 dark:bg-purple-950/30 text-purple-600 dark:text-purple-400';
+                case 'Fitness': return 'bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400';
+                case 'Personal': return 'bg-pink-50 dark:bg-pink-950/30 text-pink-600 dark:text-pink-400';
+                default: return 'bg-gray-50 dark:bg-gray-950/30 text-gray-600 dark:text-gray-400';
+              }
+            };
+
+            return upcomingEvents.length > 0 ? upcomingEvents.map((event) => (
+              <div key={event.id} className="bg-white dark:bg-surface-dark p-5 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-800 hover:border-primary/30 transition-all cursor-pointer group">
+                <div className="flex justify-between items-start mb-3">
+                  <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${getCategoryStyles(event.category)}`}>
+                    {event.category}
+                  </span>
+                  <span className="text-[10px] text-text-muted font-bold">{getTimeRemaining(event.startDate, event.startTime || '00:00')}</span>
+                </div>
+                <h4 className="font-extrabold text-text-main dark:text-white text-sm mb-2 group-hover:text-primary transition-colors">
+                  {event.title}
+                </h4>
+                <div className="flex items-center gap-2 text-text-muted">
+                  <span className="material-symbols-outlined text-[16px]">schedule</span>
+                  <span className="text-xs font-bold">{formatTime(event.startTime || '00:00')} - {formatTime(event.endTime || '23:59')}</span>
+                </div>
               </div>
-              <h4 className="font-extrabold text-text-main dark:text-white text-sm mb-2 group-hover:text-primary transition-colors">
-                {task.title}
-              </h4>
-              <div className="flex items-center gap-2 text-text-muted">
-                <span className="material-symbols-outlined text-[16px]">schedule</span>
-                <span className="text-xs font-bold">{formatTime(task.startTime)} - {formatTime(task.endTime)}</span>
+            )) : (
+              <div className="text-center py-8 text-text-muted">
+                <span className="material-symbols-outlined text-4xl mb-2 opacity-30">event_available</span>
+                <p className="text-sm font-bold">No upcoming events</p>
               </div>
-            </div>
-          ))}
+            );
+          })()}
         </div>
       </div>
     </aside>
@@ -1002,7 +984,8 @@ const CalendarHub: React.FC = () => {
       category: e.category,
       description: e.description,
       colorClass: e.colorClass,
-      bgClass: e.bgClass
+      bgClass: e.bgClass,
+      startDate: e.startDate // Keep startDate for month view matching
     }));
 
     switch (calendarMode) {
@@ -1011,7 +994,7 @@ const CalendarHub: React.FC = () => {
       case CalendarMode.WEEK:
         return <CalendarGrid events={localEvents} currentDate={currentDate} />;
       case CalendarMode.MONTH:
-        return <MonthView events={localEvents} />;
+        return <MonthView events={localEvents} selectedMonth={selectedMonth} selectedYear={selectedYear} />;
       case CalendarMode.YEAR:
         return <YearView onMonthClick={handleMonthClickFromYear} />;
       default:
@@ -1100,7 +1083,7 @@ const CalendarHub: React.FC = () => {
         {/* Right Sidebar */}
         <div className={`transition-all duration-300 ease-in-out border-l border-gray-100 dark:border-gray-800 flex overflow-hidden ${isSidebarOpen ? 'w-full lg:w-80' : 'w-0 border-l-0'}`}>
           <div className="w-80 shrink-0 h-full overflow-y-auto pt-5">
-            <RightSidebar />
+            <RightSidebar events={unifiedEvents} />
           </div>
         </div>
       </main>

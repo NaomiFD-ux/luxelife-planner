@@ -9,16 +9,34 @@ interface AnalyticsPlannerViewProps {
 }
 
 const AnalyticsPlannerView: React.FC<AnalyticsPlannerViewProps> = ({ tasks, habits, categories }) => {
-  // Mocking some historical data for the line graph
-  const weeklyData = [
-    { day: 'Mon', value: 65 },
-    { day: 'Tue', value: 40 },
-    { day: 'Wed', value: 85 },
-    { day: 'Thu', value: 70 },
-    { day: 'Fri', value: 90 },
-    { day: 'Sat', value: 55 },
-    { day: 'Sun', value: 95 },
-  ];
+  // Calculate real weekly data based on daily ritual completion
+  const weeklyData = useMemo(() => {
+    const dailyRituals = habits.filter(h => h.frequency === 'daily');
+    const today = new Date();
+    const data = [];
+
+    // Generate data for last 7 days
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD
+      const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+
+      // Count how many daily rituals were completed on this date
+      const completedCount = dailyRituals.filter(habit =>
+        habit.completionDates?.includes(dateStr)
+      ).length;
+
+      // Calculate percentage (0-100)
+      const percentage = dailyRituals.length > 0
+        ? Math.round((completedCount / dailyRituals.length) * 100)
+        : 0;
+
+      data.push({ day: dayName, value: percentage });
+    }
+
+    return data;
+  }, [habits]);
 
   const maxVal = 100;
   const chartHeight = 200;
@@ -48,10 +66,11 @@ const AnalyticsPlannerView: React.FC<AnalyticsPlannerViewProps> = ({ tasks, habi
   // Stats Calculations
   const completedTasks = tasks.filter(t => t.status === TaskStatus.DONE).length;
   const totalTasks = tasks.length;
+  const activeTasks = tasks.filter(t => t.status !== TaskStatus.DONE); // Tasks that are not completed
   const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-  
-  const avgHabitStreak = habits.length > 0 
-    ? Math.round(habits.reduce((acc, h) => acc + h.streak, 0) / habits.length) 
+
+  const avgHabitStreak = habits.length > 0
+    ? Math.round(habits.reduce((acc, h) => acc + h.streak, 0) / habits.length)
     : 0;
 
   return (
@@ -150,10 +169,10 @@ const AnalyticsPlannerView: React.FC<AnalyticsPlannerViewProps> = ({ tasks, habi
             <div className="relative size-48">
               <svg viewBox="0 0 100 100" className="size-full rotate-[-90deg]">
                 {categories.map((cat, i) => {
-                  const catTasks = tasks.filter(t => t.categoryId === cat.id).length;
-                  const percent = totalTasks > 0 ? (catTasks / totalTasks) * 100 : 0;
+                  const catActiveTasks = activeTasks.filter(t => t.categoryId === cat.id).length;
+                  const percent = activeTasks.length > 0 ? (catActiveTasks / activeTasks.length) * 100 : 0;
                   return (
-                    <circle 
+                    <circle
                       key={cat.id}
                       cx="50" cy="50" r="40"
                       fill="transparent"
@@ -167,22 +186,25 @@ const AnalyticsPlannerView: React.FC<AnalyticsPlannerViewProps> = ({ tasks, habi
                 })}
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <p className="text-3xl font-black text-text-main dark:text-white">{totalTasks}</p>
-                <p className="text-[10px] font-black text-text-muted dark:text-gray-400 uppercase tracking-widest">Total Rituals</p>
+                <p className="text-3xl font-black text-text-main dark:text-white">{activeTasks.length}</p>
+                <p className="text-[10px] font-black text-text-muted dark:text-gray-400 uppercase tracking-widest">Active Rituals</p>
               </div>
             </div>
 
             <div className="mt-10 grid grid-cols-2 gap-4 w-full px-2">
-              {categories.slice(0, 4).map(cat => {
-                const count = tasks.filter(t => t.categoryId === cat.id).length;
-                return (
+              {categories
+                .map(cat => ({
+                  ...cat,
+                  count: activeTasks.filter(t => t.categoryId === cat.id).length
+                }))
+                .filter(cat => cat.count > 0) // Only show categories with active tasks
+                .map(cat => (
                   <div key={cat.id} className="flex items-center gap-2">
                     <div className="size-2.5 rounded-full" style={{ backgroundColor: cat.color }}></div>
                     <span className="text-xs font-black text-text-main dark:text-white truncate">{cat.name}</span>
-                    <span className="text-[10px] font-black text-text-muted dark:text-gray-400 ml-auto">{count}</span>
+                    <span className="text-[10px] font-black text-text-muted dark:text-gray-400 ml-auto">{cat.count}</span>
                   </div>
-                );
-              })}
+                ))}
             </div>
           </div>
         </div>
@@ -208,26 +230,36 @@ const AnalyticsPlannerView: React.FC<AnalyticsPlannerViewProps> = ({ tasks, habi
             </div>
             
             <div className="flex flex-col gap-3">
-              {habits.map(habit => (
-                <div key={habit.id} className="grid grid-cols-8 gap-4 items-center">
-                  <div className="col-span-1 text-sm font-black text-text-main dark:text-white truncate pr-2">{habit.name}</div>
-                  {weeklyData.map((d, i) => {
-                    // Randomize dots for demo; in production use real completion dates
-                    const active = Math.random() > 0.3; 
-                    return (
-                      <div key={i} className="flex justify-center">
-                        <div className={`size-10 rounded-2xl flex items-center justify-center transition-all ${
-                          active ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'bg-background-light dark:bg-background-dark text-text-muted dark:text-gray-600 opacity-30'
-                        }`}>
-                          <span className="material-symbols-outlined text-[18px]">
-                            {active ? 'check' : 'close'}
-                          </span>
+              {habits.map(habit => {
+                // Calculate date strings for the last 7 days
+                const today = new Date();
+                const last7Days = Array.from({ length: 7 }, (_, i) => {
+                  const date = new Date(today);
+                  date.setDate(date.getDate() - (6 - i));
+                  return date.toISOString().split('T')[0]; // YYYY-MM-DD
+                });
+
+                return (
+                  <div key={habit.id} className="grid grid-cols-8 gap-4 items-center">
+                    <div className="col-span-1 text-sm font-black text-text-main dark:text-white truncate pr-2">{habit.name}</div>
+                    {last7Days.map((dateStr, i) => {
+                      // Check if habit was completed on this date
+                      const active = habit.completionDates?.includes(dateStr) || false;
+                      return (
+                        <div key={i} className="flex justify-center">
+                          <div className={`size-10 rounded-2xl flex items-center justify-center transition-all ${
+                            active ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'bg-background-light dark:bg-background-dark text-text-muted dark:text-gray-600 opacity-30'
+                          }`}>
+                            <span className="material-symbols-outlined text-[18px]">
+                              {active ? 'check' : 'close'}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

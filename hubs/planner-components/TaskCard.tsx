@@ -7,9 +7,10 @@ interface TaskCardProps {
   categories: Category[];
   onStatusChange: (taskId: string, newStatus: TaskStatus) => void;
   onEdit?: (task: Task) => void;
+  onDelete?: (taskId: string) => void;
 }
 
-const TaskCard: React.FC<TaskCardProps> = ({ task, categories, onStatusChange, onEdit }) => {
+const TaskCard: React.FC<TaskCardProps> = ({ task, categories, onStatusChange, onEdit, onDelete }) => {
   const category = categories.find(c => c.id === task.categoryId);
   
   const getPriorityStyles = (p: TaskPriority) => {
@@ -55,21 +56,35 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, categories, onStatusChange, o
             </span>
           )}
         </div>
-        
-        <button 
-          onClick={handleNextStatus}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold transition-all border ${
-            task.status === TaskStatus.TODO ? 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400' :
-            task.status === TaskStatus.IN_PROGRESS ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-900 text-amber-600 dark:text-amber-400' :
-            'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-900 text-green-600 dark:text-green-400'
-          }`}
-        >
-          <span className="material-symbols-outlined text-[14px]">
-            {task.status === TaskStatus.TODO ? 'radio_button_unchecked' :
-             task.status === TaskStatus.IN_PROGRESS ? 'pending' : 'check_circle'}
-          </span>
-          {task.status}
-        </button>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleNextStatus}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold transition-all border ${
+              task.status === TaskStatus.TODO ? 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400' :
+              task.status === TaskStatus.IN_PROGRESS ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-900 text-amber-600 dark:text-amber-400' :
+              'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-900 text-green-600 dark:text-green-400'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[14px]">
+              {task.status === TaskStatus.TODO ? 'radio_button_unchecked' :
+               task.status === TaskStatus.IN_PROGRESS ? 'pending' : 'check_circle'}
+            </span>
+            {task.status}
+          </button>
+
+          {onDelete && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(task.id);
+              }}
+              className="size-7 rounded-full bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100"
+            >
+              <span className="material-symbols-outlined text-[16px]">delete</span>
+            </button>
+          )}
+        </div>
       </div>
 
       <h4 className={`font-bold text-lg text-text-main dark:text-white leading-tight ${isDone ? 'line-through' : ''}`}>

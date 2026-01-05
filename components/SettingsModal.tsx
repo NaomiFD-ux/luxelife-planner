@@ -15,10 +15,29 @@ interface SettingsModalProps {
 type SettingsTab = 'hubs' | 'general' | 'account' | 'notifications' | 'appearance' | 'integrations';
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
-  const { user, isDark, setIsDark, enabledHubs, setEnabledHubs } = useApp();
+  const { user, setUser, isDark, setIsDark, enabledHubs, setEnabledHubs } = useApp();
   const [activeTab, setActiveTab] = useState<SettingsTab>('hubs');
   const { settings, updateSettings } = useSyncSettings();
   const { isConnected, userEmail, disconnectGoogleCalendar } = useGoogleCalendar();
+
+  // Form state for account settings
+  const [formName, setFormName] = useState(user.name);
+  const [formEmail, setFormEmail] = useState(user.email || '');
+  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+
+  // Save user profile changes
+  const handleSaveProfile = () => {
+    setUser({
+      ...user,
+      name: formName
+    });
+
+    // Show success message
+    setShowSaveSuccess(true);
+    setTimeout(() => setShowSaveSuccess(false), 3000);
+
+    // TODO: Handle email and password updates
+  };
 
   const formatLastSync = (lastSyncTime: string | null): string => {
     if (!lastSyncTime) return 'Never synced';
@@ -217,7 +236,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                 </div>
 
                 <div className="flex items-center gap-6 p-6 bg-background-light dark:bg-background-dark rounded-2xl">
-                  <img src={user.avatar} alt={user.name} className="size-20 rounded-full object-cover ring-4 ring-primary/20" />
+                  {user.avatar ? (
+                    <img src={user.avatar} alt={user.name} className="size-20 rounded-full object-cover ring-4 ring-primary/20" />
+                  ) : (
+                    <div className="size-20 rounded-full bg-primary/20 ring-4 ring-primary/20 flex items-center justify-center">
+                      <span className="text-2xl font-black text-primary">
+                        {user.name ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'U'}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex-1">
                     <h5 className="text-base font-bold text-text-main dark:text-white mb-1">{user.name}</h5>
                     <p className="text-xs text-primary font-bold uppercase tracking-wider">{user.plan}</p>
@@ -231,27 +258,57 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                   <div className="p-5 bg-background-light dark:bg-background-dark rounded-2xl space-y-3">
                     <label className="block">
                       <span className="text-xs font-bold text-text-muted uppercase tracking-wider">Full Name</span>
-                      <input type="text" defaultValue={user.name} className="mt-2 w-full h-12 px-4 bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-text-main dark:text-white focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
+                      <input
+                        type="text"
+                        value={formName}
+                        onChange={(e) => setFormName(e.target.value)}
+                        className="mt-2 w-full h-12 px-4 bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-text-main dark:text-white focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                      />
                     </label>
                   </div>
 
                   <div className="p-5 bg-background-light dark:bg-background-dark rounded-2xl space-y-3">
                     <label className="block">
                       <span className="text-xs font-bold text-text-muted uppercase tracking-wider">Email Address</span>
-                      <input type="email" defaultValue="sarah.jenkins@example.com" className="mt-2 w-full h-12 px-4 bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-text-main dark:text-white focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
+                      <input
+                        type="email"
+                        value={formEmail}
+                        onChange={(e) => setFormEmail(e.target.value)}
+                        className="mt-2 w-full h-12 px-4 bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-text-main dark:text-white focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                      />
                     </label>
                   </div>
 
                   <div className="p-5 bg-background-light dark:bg-background-dark rounded-2xl space-y-3">
                     <label className="block">
                       <span className="text-xs font-bold text-text-muted uppercase tracking-wider">Password</span>
-                      <input type="password" defaultValue="••••••••" className="mt-2 w-full h-12 px-4 bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-text-main dark:text-white focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all" />
+                      <input
+                        type="password"
+                        placeholder="••••••••"
+                        className="mt-2 w-full h-12 px-4 bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-text-main dark:text-white focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                      />
                     </label>
                   </div>
 
-                  <button className="w-full py-3 bg-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] transition-all">
+                  <button
+                    onClick={handleSaveProfile}
+                    className="w-full py-3 bg-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] transition-all"
+                  >
                     Save Changes
                   </button>
+
+                  {/* Success Message */}
+                  {showSaveSuccess && (
+                    <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+                      <div className="size-8 rounded-full bg-green-500 flex items-center justify-center">
+                        <span className="material-symbols-outlined text-white text-lg">check</span>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-bold text-green-900 dark:text-green-100">Profile Updated!</p>
+                        <p className="text-xs text-green-700 dark:text-green-300">Your changes have been saved successfully.</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="pt-6 border-t border-gray-200 dark:border-gray-800">

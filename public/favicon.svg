@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Pink diamond matching the LuxeLife logo -->
+  <path d="M16 2L28 12L16 30L4 12L16 2Z" fill="#f4258c"/>
+  <path d="M16 2L28 12H4L16 2Z" fill="#ff5aa8"/>
+  <path d="M4 12L16 30L16 12H4Z" fill="#d91f76"/>
+  <path d="M16 12L28 12L16 30V12Z" fill="#f4258c"/>
+</svg>

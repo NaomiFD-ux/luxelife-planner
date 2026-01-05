@@ -1,6 +1,9 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../firebase/firebaseConfig';
+import { useAuth } from '../contexts/AuthContext';
 import TaskCard from './planner-components/TaskCard';
 import HabitsManageView from './planner-components/HabitsManageView';
 import CalendarPlannerView from './planner-components/CalendarPlannerView';
@@ -11,11 +14,126 @@ import { useEvents } from '../contexts/EventsContext';
 
 const PlannerHub: React.FC = () => {
   const { addEvent, deleteEventsBySource, events } = useEvents();
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
-  const [habits, setHabits] = useState<Habit[]>(INITIAL_HABITS);
-  const [categories, setCategories] = useState<Category[]>(INITIAL_CATEGORIES);
+  const { user } = useAuth();
+
+  // Firestore-backed state with localStorage fallback
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [habits, setHabits] = useState<Habit[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Load tasks from Firestore with real-time sync
+  useEffect(() => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'planner_tasks'),
+      where('userId', '==', user.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Task[];
+
+      setTasks(data);
+      setLoading(false);
+
+      // Backup to localStorage
+      localStorage.setItem('luxelife_planner_tasks', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading tasks:', error);
+      // Fallback to localStorage
+      const saved = localStorage.getItem('luxelife_planner_tasks');
+      if (saved) {
+        try {
+          setTasks(JSON.parse(saved));
+        } catch (e) {
+          setTasks(INITIAL_TASKS);
+        }
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load habits from Firestore with real-time sync
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, 'planner_habits'),
+      where('userId', '==', user.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Habit[];
+
+      setHabits(data);
+
+      // Backup to localStorage
+      localStorage.setItem('luxelife_planner_habits', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading habits:', error);
+      // Fallback to localStorage
+      const saved = localStorage.getItem('luxelife_planner_habits');
+      if (saved) {
+        try {
+          setHabits(JSON.parse(saved));
+        } catch (e) {
+          setHabits(INITIAL_HABITS);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load categories from Firestore with real-time sync
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, 'planner_categories'),
+      where('userId', '==', user.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Category[];
+
+      setCategories(data.length > 0 ? data : INITIAL_CATEGORIES);
+
+      // Backup to localStorage
+      localStorage.setItem('luxelife_planner_categories', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading categories:', error);
+      // Fallback to localStorage
+      const saved = localStorage.getItem('luxelife_planner_categories');
+      if (saved) {
+        try {
+          setCategories(JSON.parse(saved));
+        } catch (e) {
+          setCategories(INITIAL_CATEGORIES);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   // Sync tasks to EventsContext
   useEffect(() => {
@@ -23,26 +141,28 @@ const PlannerHub: React.FC = () => {
     const plannerEvents = events.filter(e => e.source === 'planner');
     plannerEvents.forEach(e => deleteEventsBySource(e.sourceId));
 
-    // Add tasks with due dates as events
+    // Add tasks with due dates AND times as events
     tasks.forEach(task => {
       if (!task.dueDate) return; // Skip tasks without due dates
+      if (!task.dueTime) return; // ONLY sync tasks with specific times
 
       const category = categories.find(c => c.id === task.categoryId);
 
       addEvent({
         title: task.title,
         startDate: task.dueDate,
+        startTime: task.dueTime,
         category: 'Personal',
         description: task.description,
         source: 'planner',
         sourceId: task.id,
-        colorClass: 'text-orange-600',
-        bgClass: 'bg-orange-100',
-        allDay: true, // Tasks are all-day events
+        colorClass: 'border-orange-600 text-orange-900 dark:text-orange-100',
+        bgClass: 'bg-orange-50 dark:bg-orange-950/30',
+        allDay: false, // Tasks with times are NOT all-day
       });
     });
   }, [tasks, categories]);
-  
+
   // Parse active view from URL hash or default to 'planner'
   const getActiveNav = () => {
     const hash = location.hash.replace('#', '');
@@ -68,6 +188,12 @@ const PlannerHub: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [showDeleteTaskModal, setShowDeleteTaskModal] = useState(false);
+  const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
+  const [showDeleteHabitModal, setShowDeleteHabitModal] = useState(false);
+  const [habitToDelete, setHabitToDelete] = useState<string | null>(null);
+  const [showDeleteCategoryModal, setShowDeleteCategoryModal] = useState(false);
+  const [categoryToDelete, setCategoryToDelete] = useState<string | null>(null);
 
   // Unified task form state
   const [taskTitle, setTaskTitle] = useState('');
@@ -75,9 +201,16 @@ const PlannerHub: React.FC = () => {
   const [taskPriority, setTaskPriority] = useState<TaskPriority>(TaskPriority.MEDIUM);
   const [taskStatus, setTaskStatus] = useState<TaskStatus>(TaskStatus.TODO);
   const [taskDueDate, setTaskDueDate] = useState('');
-  const [selectedCatId, setSelectedCatId] = useState(categories[0].id);
+  const [selectedCatId, setSelectedCatId] = useState('');
   const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+
+  // Set default category when categories load
+  useEffect(() => {
+    if (categories.length > 0 && !selectedCatId) {
+      setSelectedCatId(categories[0].id);
+    }
+  }, [categories, selectedCatId]);
 
   // Main task filtering logic
   const plannerTasks = useMemo(() => {
@@ -100,23 +233,48 @@ const PlannerHub: React.FC = () => {
     } as Record<string, Task[]>;
   }, [plannerTasks]);
 
-  const handleStatusChange = (taskId: string, newStatus: TaskStatus) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+  const handleStatusChange = async (taskId: string, newStatus: TaskStatus) => {
+    if (!user) return;
+
+    try {
+      await setDoc(doc(db, 'planner_tasks', taskId), {
+        status: newStatus,
+        userId: user.uid,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (error) {
+      console.error('Error updating task status:', error);
+    }
   };
 
-  const handleToggleHabit = (habitId: string) => {
-    setHabits(prev => prev.map(h => {
-      if (h.id === habitId) {
-        const isNowCompleted = !h.completed;
-        return { 
-          ...h, 
-          completed: isNowCompleted,
-          progress: isNowCompleted ? h.goal : 0,
-          streak: isNowCompleted ? h.streak + 1 : Math.max(0, h.streak - 1)
-        };
-      }
-      return h;
-    }));
+  const handleToggleHabit = async (habitId: string) => {
+    if (!user) return;
+
+    const habit = habits.find(h => h.id === habitId);
+    if (!habit) return;
+
+    const isNowCompleted = !habit.completed;
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const completionDates = habit.completionDates || [];
+
+    // Add or remove today's date from completion history
+    const updatedCompletionDates = isNowCompleted
+      ? completionDates.includes(today) ? completionDates : [...completionDates, today]
+      : completionDates.filter(d => d !== today);
+
+    try {
+      await setDoc(doc(db, 'planner_habits', habitId), {
+        ...habit,
+        completed: isNowCompleted,
+        progress: isNowCompleted ? habit.goal : 0,
+        streak: isNowCompleted ? habit.streak + 1 : Math.max(0, habit.streak - 1),
+        completionDates: updatedCompletionDates,
+        userId: user.uid,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error toggling habit:', error);
+    }
   };
 
   const openCreateModal = () => {
@@ -126,7 +284,7 @@ const PlannerHub: React.FC = () => {
     setTaskPriority(TaskPriority.MEDIUM);
     setTaskStatus(TaskStatus.TODO);
     setTaskDueDate(new Date().toISOString().split('T')[0]);
-    setSelectedCatId(categories[0].id);
+    setSelectedCatId(categories.length > 0 ? categories[0].id : '');
     setSubtasks([]);
     setShowTaskModal(true);
   };
@@ -138,40 +296,37 @@ const PlannerHub: React.FC = () => {
     setTaskPriority(task.priority);
     setTaskStatus(task.status);
     setTaskDueDate(task.dueDate);
-    setSelectedCatId(task.categoryId || categories[0].id);
+    setSelectedCatId(task.categoryId || (categories.length > 0 ? categories[0].id : ''));
     setSubtasks(task.subtaskItems || []);
     setShowTaskModal(true);
   };
 
-  const handleSaveTask = () => {
-    if (!taskTitle) return;
+  const handleSaveTask = async () => {
+    if (!taskTitle || !user) return;
 
-    if (editingTask) {
-      setTasks(prev => prev.map(t => t.id === editingTask.id ? {
-        ...t,
-        title: taskTitle,
-        description: taskDescription,
-        priority: taskPriority,
-        status: taskStatus,
-        dueDate: taskDueDate,
-        categoryId: selectedCatId,
-        subtaskItems: subtasks
-      } : t));
-    } else {
-      const newTask: Task = {
-        id: `task-${Date.now()}`,
-        title: taskTitle,
-        description: taskDescription,
-        priority: taskPriority,
-        status: taskStatus,
-        dueDate: taskDueDate,
-        categoryId: selectedCatId,
-        subtaskItems: subtasks
-      };
-      setTasks(prev => [newTask, ...prev]);
+    const taskId = editingTask ? editingTask.id : `task-${Date.now()}`;
+    const taskData: Task = {
+      id: taskId,
+      title: taskTitle,
+      description: taskDescription,
+      priority: taskPriority,
+      status: taskStatus,
+      dueDate: taskDueDate,
+      categoryId: selectedCatId,
+      subtaskItems: subtasks
+    };
+
+    try {
+      await setDoc(doc(db, 'planner_tasks', taskId), {
+        ...taskData,
+        userId: user.uid,
+        updatedAt: new Date().toISOString()
+      });
+      setShowTaskModal(false);
+    } catch (error) {
+      console.error('Error saving task:', error);
+      alert('Failed to save task. Please try again.');
     }
-    
-    setShowTaskModal(false);
   };
 
   const addSubtask = () => {
@@ -191,6 +346,25 @@ const PlannerHub: React.FC = () => {
 
   const removeSubtask = (id: string) => {
     setSubtasks(subtasks.filter(s => s.id !== id));
+  };
+
+  const handleDeleteTask = async () => {
+    if (!taskToDelete || !user) return;
+
+    try {
+      // Delete from Firestore
+      await deleteDoc(doc(db, 'planner_tasks', taskToDelete));
+
+      // Remove associated calendar event
+      deleteEventsBySource(taskToDelete);
+
+      // Close modal and reset state
+      setShowDeleteTaskModal(false);
+      setTaskToDelete(null);
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      alert('Failed to delete task. Please try again.');
+    }
   };
 
   // Render Daily Rituals Sidebar
@@ -321,23 +495,110 @@ const PlannerHub: React.FC = () => {
     </div>
   );
 
-  const onAddHabit = (habit: Habit) => {
-    setHabits([habit, ...habits]);
+  const onAddHabit = async (habit: Habit) => {
+    if (!user) return;
+
+    try {
+      await setDoc(doc(db, 'planner_habits', habit.id), {
+        ...habit,
+        userId: user.uid,
+        createdAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error adding habit:', error);
+      alert('Failed to add habit. Please try again.');
+    }
   };
 
-  const onAddCategory = (category: Category) => {
-    setCategories([...categories, category]);
+  const onAddCategory = async (category: Category) => {
+    if (!user) return;
+
+    try {
+      await setDoc(doc(db, 'planner_categories', category.id), {
+        ...category,
+        userId: user.uid,
+        createdAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error adding category:', error);
+      alert('Failed to add category. Please try again.');
+    }
+  };
+
+  const handleDeleteHabit = async () => {
+    if (!habitToDelete || !user) return;
+
+    try {
+      // Delete from Firestore
+      await deleteDoc(doc(db, 'planner_habits', habitToDelete));
+
+      // Close modal and reset state
+      setShowDeleteHabitModal(false);
+      setHabitToDelete(null);
+    } catch (error) {
+      console.error('Error deleting habit:', error);
+      alert('Failed to delete habit. Please try again.');
+    }
+  };
+
+  const handleDeleteCategory = async () => {
+    if (!categoryToDelete || !user) return;
+
+    // Find other categories to reassign tasks to
+    const remainingCategories = categories.filter(c => c.id !== categoryToDelete);
+    const defaultCategory = remainingCategories.length > 0 ? remainingCategories[0] : null;
+
+    try {
+      if (defaultCategory) {
+        // Reassign all tasks from deleted category to the first remaining category
+        const affectedTasks = tasks.filter(task => task.categoryId === categoryToDelete);
+
+        for (const task of affectedTasks) {
+          await setDoc(doc(db, 'planner_tasks', task.id), {
+            ...task,
+            categoryId: defaultCategory.id,
+            userId: user.uid,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      } else {
+        // If no categories remain, delete all tasks in this category
+        const affectedTasks = tasks.filter(task => task.categoryId === categoryToDelete);
+
+        for (const task of affectedTasks) {
+          await deleteDoc(doc(db, 'planner_tasks', task.id));
+        }
+      }
+
+      // Delete category from Firestore
+      await deleteDoc(doc(db, 'planner_categories', categoryToDelete));
+
+      // Close modal and reset state
+      setShowDeleteCategoryModal(false);
+      setCategoryToDelete(null);
+    } catch (error) {
+      console.error('Error deleting category:', error);
+      alert('Failed to delete category. Please try again.');
+    }
   };
 
   const renderContent = () => {
     switch (activeNav) {
       case 'habits':
         return (
-          <HabitsManageView 
-            habits={habits} 
-            categories={categories} 
+          <HabitsManageView
+            habits={habits}
+            categories={categories}
             onAddHabit={onAddHabit}
             onAddCategory={onAddCategory}
+            onDeleteHabit={(habitId) => {
+              setHabitToDelete(habitId);
+              setShowDeleteHabitModal(true);
+            }}
+            onDeleteCategory={(categoryId) => {
+              setCategoryToDelete(categoryId);
+              setShowDeleteCategoryModal(true);
+            }}
           />
         );
       case 'calendar':
@@ -351,19 +612,10 @@ const PlannerHub: React.FC = () => {
 
   const renderPlannerView = () => (
     <>
-      {/* Header with Search and Actions */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-        <div className="flex items-center bg-white dark:bg-surface-dark rounded-2xl h-11 w-full md:w-80 px-4 border border-gray-100 dark:border-gray-800 focus-within:border-primary/20 transition-all shadow-sm">
-          <span className="material-symbols-outlined text-text-muted dark:text-gray-500 text-[20px]">search</span>
-          <input 
-            className="bg-transparent border-none text-sm text-text-main dark:text-white placeholder-text-muted dark:placeholder-gray-500 focus:ring-0 w-full ml-2 font-medium outline-none" 
-            placeholder="Search rituals..." 
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        <button 
-          onClick={openCreateModal} 
+      {/* Header with Actions */}
+      <div className="flex justify-end mb-6">
+        <button
+          onClick={openCreateModal}
           className="flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-2xl text-sm font-black shadow-xl shadow-primary/30 hover:shadow-primary/40 hover:-translate-y-0.5 transition-all active:scale-95"
         >
           <span className="material-symbols-outlined text-[20px]">add</span>
@@ -389,12 +641,16 @@ const PlannerHub: React.FC = () => {
                   </div>
                   <div className="flex flex-col gap-4">
                     {taskList.length > 0 ? taskList.map(task => (
-                      <TaskCard 
-                        key={task.id} 
-                        task={task} 
-                        categories={categories} 
-                        onStatusChange={handleStatusChange} 
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        categories={categories}
+                        onStatusChange={handleStatusChange}
                         onEdit={openEditModal}
+                        onDelete={(taskId) => {
+                          setTaskToDelete(taskId);
+                          setShowDeleteTaskModal(true);
+                        }}
                       />
                     )) : (
                       <div className="py-12 border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-[2rem] flex flex-col items-center justify-center text-text-muted dark:text-gray-500 bg-white/30 dark:bg-surface-dark/30">
@@ -411,12 +667,16 @@ const PlannerHub: React.FC = () => {
           {viewMode === 'list' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {plannerTasks.map(task => (
-                <TaskCard 
-                  key={task.id} 
-                  task={task} 
-                  categories={categories} 
-                  onStatusChange={handleStatusChange} 
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  categories={categories}
+                  onStatusChange={handleStatusChange}
                   onEdit={openEditModal}
+                  onDelete={(taskId) => {
+                    setTaskToDelete(taskId);
+                    setShowDeleteTaskModal(true);
+                  }}
                 />
               ))}
             </div>
@@ -433,12 +693,16 @@ const PlannerHub: React.FC = () => {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {plannerTasks.map(task => (
-                  <TaskCard 
-                    key={task.id} 
-                    task={task} 
-                    categories={categories} 
-                    onStatusChange={handleStatusChange} 
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    categories={categories}
+                    onStatusChange={handleStatusChange}
                     onEdit={openEditModal}
+                    onDelete={(taskId) => {
+                      setTaskToDelete(taskId);
+                      setShowDeleteTaskModal(true);
+                    }}
                   />
                 ))}
               </div>
@@ -654,6 +918,157 @@ const PlannerHub: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Task Confirmation Modal */}
+      {showDeleteTaskModal && taskToDelete && (() => {
+        const task = tasks.find(t => t.id === taskToDelete);
+        if (!task) return null;
+
+        return (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
+            <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-sm w-full p-6">
+              <div className="text-center mb-6">
+                <div className="size-16 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center mx-auto mb-4">
+                  <span className="material-symbols-outlined text-3xl text-red-600">delete</span>
+                </div>
+                <h3 className="text-lg font-black mb-2">Delete Task?</h3>
+                <p className="text-sm text-text-muted mb-3">
+                  This will permanently delete <span className="font-bold text-text-main dark:text-white">"{task.title}"</span>.
+                </p>
+                <p className="text-sm text-text-muted">
+                  This task will also be removed from your calendar. This action cannot be undone.
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowDeleteTaskModal(false);
+                    setTaskToDelete(null);
+                  }}
+                  className="flex-1 px-4 py-3 bg-background-light dark:bg-background-dark text-text-main dark:text-white rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteTask}
+                  className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Delete Habit Confirmation Modal */}
+      {showDeleteHabitModal && habitToDelete && (() => {
+        const habit = habits.find(h => h.id === habitToDelete);
+        if (!habit) return null;
+
+        return (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
+            <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-sm w-full p-6">
+              <div className="text-center mb-6">
+                <div className="size-16 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center mx-auto mb-4">
+                  <span className="material-symbols-outlined text-3xl text-red-600">delete</span>
+                </div>
+                <h3 className="text-lg font-black mb-2">Delete Habit?</h3>
+                <p className="text-sm text-text-muted mb-3">
+                  This will permanently delete the habit <span className="font-bold text-text-main dark:text-white">"{habit.name}"</span>.
+                </p>
+                <p className="text-sm text-text-muted">
+                  Your {habit.streak} day streak will be lost. This action cannot be undone.
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowDeleteHabitModal(false);
+                    setHabitToDelete(null);
+                  }}
+                  className="flex-1 px-4 py-3 bg-background-light dark:bg-background-dark text-text-main dark:text-white rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteHabit}
+                  className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Delete Category Confirmation Modal */}
+      {showDeleteCategoryModal && categoryToDelete && (() => {
+        const category = categories.find(c => c.id === categoryToDelete);
+        if (!category) return null;
+
+        const affectedTasks = tasks.filter(t => t.categoryId === categoryToDelete);
+        const remainingCategories = categories.filter(c => c.id !== categoryToDelete);
+        const defaultCategory = remainingCategories.length > 0 ? remainingCategories[0] : null;
+
+        return (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
+            <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-md w-full p-6">
+              <div className="text-center mb-6">
+                <div className="size-16 rounded-full bg-red-50 dark:bg-red-950/20 flex items-center justify-center mx-auto mb-4">
+                  <span className="material-symbols-outlined text-3xl text-red-600">delete</span>
+                </div>
+                <h3 className="text-lg font-black mb-2">Delete Category?</h3>
+                <p className="text-sm text-text-muted mb-3">
+                  This will permanently delete the category <span className="font-bold text-text-main dark:text-white">"{category.name}"</span>.
+                </p>
+
+                {affectedTasks.length > 0 && (
+                  <div className="mb-3 p-3 bg-orange-50 dark:bg-orange-950/20 rounded-xl">
+                    <p className="text-sm font-bold text-orange-600 dark:text-orange-400 mb-1">
+                      {affectedTasks.length} task{affectedTasks.length > 1 ? 's' : ''} will be affected
+                    </p>
+                    {defaultCategory ? (
+                      <p className="text-xs text-text-muted">
+                        Tasks will be moved to "<span className="font-bold">{defaultCategory.name}</span>"
+                      </p>
+                    ) : (
+                      <p className="text-xs text-text-muted">
+                        All tasks in this category will be deleted
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <p className="text-sm text-text-muted">
+                  This action cannot be undone.
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowDeleteCategoryModal(false);
+                    setCategoryToDelete(null);
+                  }}
+                  className="flex-1 px-4 py-3 bg-background-light dark:bg-background-dark text-text-main dark:text-white rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteCategory}
+                  className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

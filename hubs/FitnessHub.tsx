@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useEvents } from '../contexts/EventsContext';
+import { FastingSession, WeightEntry, FastingHistory, FastingGoal, HydrationEntry, ElectrolyteEntry, SymptomEntry, JournalEntry, ProgressPhoto } from '../types';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { db } from '../firebase/firebaseConfig';
+import { useAuth } from '../contexts/AuthContext';
 
-type FitnessSubView = 'overview' | 'workouts' | 'nutrition' | 'measurements' | 'settings';
+type FitnessSubView = 'overview' | 'workouts' | 'nutrition' | 'measurements' | 'settings' | 'fasting';
 type WorkoutLocation = 'gym' | 'home' | 'outside';
 type FitnessPlanType = 'workout-only' | 'diet-workout' | 'water-fasting';
 
@@ -79,8 +83,10 @@ interface NutritionLog {
 }
 
 const FitnessHub: React.FC = () => {
-  const { addEvent, deleteEventsBySource, events } = useEvents();
+  const { addEvent, deleteEventsBySource, clearEventsBySourceType, events } = useEvents();
+  const { user } = useAuth();
   const [currentView, setCurrentView] = useState<FitnessSubView>('overview');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const handleSubNav = (e: any) => {
@@ -270,54 +276,84 @@ const FitnessHub: React.FC = () => {
     }
   ];
 
-  const [routines, setRoutines] = useState<WorkoutRoutine[]>([
-    {
-      id: 'r1',
-      name: 'Morning Strength Routine',
-      templateIds: ['t1', 't2'],
-      daysOfWeek: [1, 3, 5], // Mon, Wed, Fri
-      time: '07:00',
-      active: true
-    },
-    {
-      id: 'r2',
-      name: 'Evening Cardio',
-      templateIds: ['t9'],
-      daysOfWeek: [2, 4], // Tue, Thu
-      time: '18:00',
-      active: true
+  const [routines, setRoutines] = useState<WorkoutRoutine[]>([]);
+
+  // Load routines from Firestore with real-time sync
+  useEffect(() => {
+    if (!user) {
+      setLoading(false);
+      return;
     }
-  ]);
+
+    const q = query(collection(db, 'fitness_routines'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as WorkoutRoutine[];
+      setRoutines(data);
+      setLoading(false);
+      localStorage.setItem('luxelife_fitness_routines', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading routines:', error);
+      const saved = localStorage.getItem('luxelife_fitness_routines');
+      if (saved) setRoutines(JSON.parse(saved));
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   const [scheduledWorkouts, setScheduledWorkouts] = useState<ScheduledWorkout[]>([]);
 
-  // Sync workouts to EventsContext
+  // Sync workout routines to calendar - SIMPLIFIED APPROACH
+  // Only syncs when routines change, generates events for 1 year ahead
   useEffect(() => {
-    // Remove all existing fitness events
-    const fitnessEvents = events.filter(e => e.source === 'fitness');
-    fitnessEvents.forEach(e => deleteEventsBySource(e.sourceId));
+    // Clear all existing fitness events first
+    clearEventsBySourceType('fitness');
 
-    // Add scheduled workouts as events
-    scheduledWorkouts.forEach(workout => {
-      const routine = routines.find(r => r.id === workout.routineId);
-      const template = workoutTemplates.find(t => t.id === workout.templateId);
-      if (!routine || !template) return;
+    // Generate events for ACTIVE routines only
+    const today = new Date();
+    const weeksAhead = 52; // 1 year ahead
 
-      addEvent({
-        title: template.name,
-        startDate: workout.date,
-        startTime: routine.time,
-        category: 'Fitness',
-        description: template.description,
-        source: 'fitness',
-        sourceId: workout.id,
-        colorClass: 'text-pink-600',
-        bgClass: 'bg-pink-100',
-        location: template.location,
-        allDay: false,
+    routines.forEach(routine => {
+      if (!routine.active) return; // Skip inactive routines
+
+      // For each selected day of the week
+      routine.daysOfWeek.forEach(dayOfWeek => {
+        // Generate events for the next year
+        for (let week = 0; week < weeksAhead; week++) {
+          const eventDate = new Date(today);
+
+          // Calculate days to add to get to the target day
+          const currentDay = eventDate.getDay();
+          let daysToAdd = dayOfWeek - currentDay;
+          if (daysToAdd < 0) daysToAdd += 7; // Next week if day passed
+          daysToAdd += (week * 7); // Add weeks
+
+          eventDate.setDate(today.getDate() + daysToAdd);
+          const formattedDate = eventDate.toISOString().split('T')[0];
+
+          // Calculate end time (default 1 hour duration)
+          const [hours, minutes] = routine.time.split(':').map(Number);
+          const endHour = (hours + 1) % 24;
+          const endTime = `${endHour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+
+          // Add event with routine name and time
+          addEvent({
+            title: routine.name,
+            startDate: formattedDate,
+            startTime: routine.time,
+            endTime: endTime,
+            category: 'Fitness',
+            description: `Workout: ${routine.name}`,
+            source: 'fitness',
+            sourceId: `fitness-routine-${routine.id}-${formattedDate}`,
+            colorClass: 'border-rose-600 text-rose-900 dark:text-rose-100',
+            bgClass: 'bg-rose-50 dark:bg-rose-950/30',
+            allDay: false,
+          });
+        }
       });
     });
-  }, [scheduledWorkouts, routines, workoutTemplates]);
+  }, [routines]); // Only re-sync when routines change
 
   // ============== MEASUREMENTS STATE ==============
   const [progressPhotos, setProgressPhotos] = useState<ProgressPhoto[]>([
@@ -464,6 +500,189 @@ const FitnessHub: React.FC = () => {
   const [editingNutritionLog, setEditingNutritionLog] = useState<NutritionLog | null>(null);
   const [selectedNutritionDate, setSelectedNutritionDate] = useState<string | null>(null);
 
+  // ============== FASTING STATE ==============
+  // Firestore-backed state for fasting
+  const [fastingSession, setFastingSession] = useState<FastingSession | null>(null);
+  const [fastingHistory, setFastingHistory] = useState<FastingHistory>({
+    sessions: [],
+    totalHoursFasted: 0,
+    totalFastsCompleted: 0,
+    longestFastHours: 0,
+    totalWeightLost: 0,
+    averageFastDuration: 0
+  });
+
+  // Load fasting data from Firestore
+  useEffect(() => {
+    if (!user) return;
+
+    // Load current fasting session
+    const unsubSession = onSnapshot(doc(db, 'fitness_fasting', user.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setFastingSession(data.session || null);
+        localStorage.setItem('luxelife_fitness_fasting', JSON.stringify(data.session));
+      }
+    }, (error) => {
+      console.error('Firestore error loading fasting session:', error);
+      const saved = localStorage.getItem('luxelife_fitness_fasting');
+      if (saved) setFastingSession(JSON.parse(saved));
+    });
+
+    // Load fasting history
+    const unsubHistory = onSnapshot(doc(db, 'fitness_fasting_history', user.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data() as FastingHistory;
+        setFastingHistory(data);
+        localStorage.setItem('luxelife_fitness_fasting_history', JSON.stringify(data));
+      }
+    }, (error) => {
+      console.error('Firestore error loading fasting history:', error);
+      const saved = localStorage.getItem('luxelife_fitness_fasting_history');
+      if (saved) setFastingHistory(JSON.parse(saved));
+    });
+
+    return () => {
+      unsubSession();
+      unsubHistory();
+    };
+  }, [user]);
+
+  const [showFastingModal, setShowFastingModal] = useState(false);
+  const [showWeightLogModal, setShowWeightLogModal] = useState(false);
+
+  // Fasting stages constant
+  const FASTING_STAGES = [
+    {
+      id: 'stage-1',
+      name: 'Blood Sugar Increase',
+      description: 'Initial spike in blood sugar after last meal',
+      startHour: 0,
+      endHour: 2,
+      benefits: ['Normal digestion', 'Energy from recent meal'],
+      icon: 'trending_up',
+      color: '#ef4444'
+    },
+    {
+      id: 'stage-2',
+      name: 'Blood Sugar Decrease',
+      description: 'Blood sugar begins to normalize',
+      startHour: 2,
+      endHour: 5,
+      benefits: ['Insulin levels dropping', 'Body preparing for fat burning'],
+      icon: 'trending_down',
+      color: '#f97316'
+    },
+    {
+      id: 'stage-3',
+      name: 'Blood Sugar Normalizes',
+      description: 'Blood sugar stabilizes at healthy levels',
+      startHour: 5,
+      endHour: 8,
+      benefits: ['Stable energy', 'Reduced hunger hormones'],
+      icon: 'horizontal_rule',
+      color: '#f59e0b'
+    },
+    {
+      id: 'stage-4',
+      name: 'Gluconeogenesis',
+      description: 'Liver begins producing glucose from non-carb sources',
+      startHour: 8,
+      endHour: 12,
+      benefits: ['Glycogen stores depleting', 'Metabolic switch beginning'],
+      icon: 'science',
+      color: '#eab308'
+    },
+    {
+      id: 'stage-5',
+      name: 'Fat Burning Mode',
+      description: 'Body primarily burning fat for energy',
+      startHour: 12,
+      endHour: 18,
+      benefits: ['Ketone production starting', 'Enhanced fat oxidation', 'Mental clarity'],
+      icon: 'local_fire_department',
+      color: '#84cc16'
+    },
+    {
+      id: 'stage-6',
+      name: 'Ketosis',
+      description: 'Full ketosis achieved - burning ketones for fuel',
+      startHour: 18,
+      endHour: 24,
+      benefits: ['Peak fat burning', 'Appetite suppression', 'Increased focus', 'Stable energy'],
+      icon: 'bolt',
+      color: '#22c55e'
+    },
+    {
+      id: 'stage-7',
+      name: 'Autophagy',
+      description: 'Cellular cleanup and regeneration process activated',
+      startHour: 24,
+      endHour: 48,
+      benefits: ['Cell repair', 'Protein recycling', 'Anti-aging effects', 'Immune boost'],
+      icon: 'auto_awesome',
+      color: '#10b981'
+    },
+    {
+      id: 'stage-8',
+      name: 'Growth Hormone Surge',
+      description: 'Human growth hormone levels increase significantly',
+      startHour: 48,
+      endHour: 54,
+      benefits: ['Muscle preservation', 'Enhanced fat loss', 'Cellular repair acceleration'],
+      icon: 'fitness_center',
+      color: '#14b8a6'
+    },
+    {
+      id: 'stage-9',
+      name: 'Insulin Sensitivity',
+      description: 'Peak insulin sensitivity and metabolic benefits',
+      startHour: 54,
+      endHour: 72,
+      benefits: ['Improved glucose metabolism', 'Enhanced cellular function', 'Reduced inflammation'],
+      icon: 'health_and_safety',
+      color: '#06b6d4'
+    },
+    {
+      id: 'stage-10',
+      name: 'Immune Cell Regulation',
+      description: 'Immune system regeneration and optimization',
+      startHour: 72,
+      endHour: 9999,
+      benefits: ['Stem cell activation', 'Immune system reset', 'Deep cellular healing', 'Maximum autophagy'],
+      icon: 'shield',
+      color: '#3b82f6'
+    }
+  ];
+
+  // Save fasting session to Firestore
+  const saveFastingSession = async (session: FastingSession | null) => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'fitness_fasting', user.uid), {
+        session,
+        userId: user.uid,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error saving fasting session:', error);
+    }
+  };
+
+  // Save fasting history to Firestore
+  const saveFastingHistory = async (history: FastingHistory) => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'fitness_fasting_history', user.uid), {
+        ...history,
+        userId: user.uid,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error saving fasting history:', error);
+    }
+  };
+
   // ============== UTILITIES ==============
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
@@ -494,6 +713,151 @@ const FitnessHub: React.FC = () => {
     if (weekScheduled.length === 0) return 0;
     const completed = weekScheduled.filter(w => w.completed).length;
     return Math.round((completed / weekScheduled.length) * 100);
+  };
+
+  // ============== FASTING SIDEBAR ==============
+  const renderFastingSidebar = () => {
+    if (!fastingSession || !fastingSession.isActive) {
+      // No active fast - show Start Fast button
+      return (
+        <div className="bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-950/30 dark:to-purple-950/30 rounded-3xl p-6 border border-blue-100 dark:border-blue-900/50 shadow-sm">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="size-12 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center">
+              <span className="material-symbols-outlined text-white text-[28px]">water_drop</span>
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-text-main dark:text-white">Water Fasting</h3>
+              <p className="text-xs text-text-muted dark:text-gray-400">Track your fasting journey</p>
+            </div>
+          </div>
+
+          <p className="text-sm text-text-muted dark:text-gray-400 mb-4">
+            Begin a transformative fasting experience with comprehensive tracking and insights.
+          </p>
+
+          <button
+            onClick={() => setCurrentView('fasting')}
+            className="w-full py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-bold shadow-lg shadow-blue-500/30 hover:shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+          >
+            <span className="material-symbols-outlined">play_circle</span>
+            <span>Start Fast</span>
+          </button>
+        </div>
+      );
+    }
+
+    // Active fast - show progress
+    const startTime = new Date(fastingSession.startTime);
+    const now = new Date();
+    const elapsedMs = now.getTime() - startTime.getTime();
+    const elapsedHours = Math.floor(elapsedMs / (1000 * 60 * 60));
+    const elapsedMinutes = Math.floor((elapsedMs % (1000 * 60 * 60)) / (1000 * 60));
+
+    // Find current stage
+    const currentStage = FASTING_STAGES.find(
+      stage => elapsedHours >= stage.startHour && elapsedHours < stage.endHour
+    ) || FASTING_STAGES[FASTING_STAGES.length - 1];
+
+    const stageProgress = currentStage.endHour === 9999
+      ? 100
+      : ((elapsedHours - currentStage.startHour) / (currentStage.endHour - currentStage.startHour)) * 100;
+
+    const nextStage = FASTING_STAGES.find(stage => stage.startHour > elapsedHours);
+    const hoursToNextStage = nextStage ? nextStage.startHour - elapsedHours : 0;
+
+    return (
+      <div className="bg-white dark:bg-surface-dark rounded-3xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="size-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${currentStage.color}20` }}>
+              <span className="material-symbols-outlined text-[24px]" style={{ color: currentStage.color }}>{currentStage.icon}</span>
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-text-main dark:text-white">Active Fast</h3>
+              <p className="text-xs font-bold" style={{ color: currentStage.color }}>{currentStage.name}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setCurrentView('fasting')}
+            className="size-8 rounded-full bg-background-light dark:bg-background-dark hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center transition-all"
+          >
+            <span className="material-symbols-outlined text-[18px]">open_in_full</span>
+          </button>
+        </div>
+
+        {/* Time Elapsed */}
+        <div className="bg-background-light dark:bg-background-dark rounded-2xl p-4 mb-4">
+          <div className="flex items-baseline gap-2 mb-1">
+            <span className="text-3xl font-black text-text-main dark:text-white">{elapsedHours}</span>
+            <span className="text-sm font-bold text-text-muted dark:text-gray-400">hours</span>
+            <span className="text-2xl font-black text-text-main dark:text-white">{elapsedMinutes}</span>
+            <span className="text-sm font-bold text-text-muted dark:text-gray-400">min</span>
+          </div>
+          <p className="text-xs text-text-muted dark:text-gray-400">Time fasted</p>
+        </div>
+
+        {/* Stage Progress */}
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-bold text-text-muted dark:text-gray-400">Stage Progress</p>
+            <p className="text-xs font-bold text-text-main dark:text-white">{Math.round(stageProgress)}%</p>
+          </div>
+          <div className="w-full bg-background-light dark:bg-background-dark rounded-full h-2 overflow-hidden">
+            <div
+              className="h-full transition-all duration-500 rounded-full"
+              style={{
+                width: `${stageProgress}%`,
+                backgroundColor: currentStage.color
+              }}
+            ></div>
+          </div>
+          {nextStage && (
+            <p className="text-xs text-text-muted dark:text-gray-400 mt-2">
+              Next: <span className="font-bold">{nextStage.name}</span> in {hoursToNextStage}h
+            </p>
+          )}
+        </div>
+
+        {/* Current Stage Benefits */}
+        <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+          <p className="text-xs font-bold text-text-muted dark:text-gray-400 mb-2">Current Benefits:</p>
+          <div className="flex flex-wrap gap-1">
+            {currentStage.benefits.slice(0, 2).map((benefit, idx) => (
+              <span
+                key={idx}
+                className="text-[10px] font-bold px-2 py-1 rounded-lg"
+                style={{
+                  backgroundColor: `${currentStage.color}15`,
+                  color: currentStage.color
+                }}
+              >
+                {benefit}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Quick Stats */}
+        {fastingSession.weightEntries && fastingSession.weightEntries.length > 1 && (
+          <div className="border-t border-gray-100 dark:border-gray-800 pt-4 mt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-text-muted dark:text-gray-400">Weight Lost</p>
+                <p className="text-lg font-black text-green-600">
+                  -{(fastingSession.startingWeight! - fastingSession.weightEntries[fastingSession.weightEntries.length - 1].weight).toFixed(1)} lbs
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-text-muted dark:text-gray-400">Goal</p>
+                <p className="text-lg font-black text-text-main dark:text-white">
+                  {fastingSession.targetWeight} lbs
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   // ============== OVERVIEW VIEW ==============
@@ -608,34 +972,53 @@ const FitnessHub: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* Fasting Tracker Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <div className="lg:col-span-12">
+            {renderFastingSidebar()}
+          </div>
+        </div>
       </div>
     );
   };
 
   // ============== WORKOUTS VIEW ==============
   const WorkoutsView = () => {
-    const handleCreateRoutine = (formData: FormData) => {
+    const handleCreateRoutine = async (formData: FormData) => {
+      if (!user) return;
+
       const days: number[] = [];
       [0, 1, 2, 3, 4, 5, 6].forEach(day => {
         if (formData.get(`day_${day}`) === 'on') days.push(day);
       });
 
+      const routineId = `r${Date.now()}`;
       const newRoutine: WorkoutRoutine = {
-        id: `r${Date.now()}`,
+        id: routineId,
         name: formData.get('name') as string,
         templateIds: selectedTemplateIds,
         daysOfWeek: days,
         time: formData.get('time') as string,
         active: true
       };
-      setRoutines(prev => [...prev, newRoutine]);
-      setIsRoutineModalOpen(false);
-      setEditingRoutine(null);
-      setSelectedTemplateIds([]);
+
+      try {
+        await setDoc(doc(db, 'fitness_routines', routineId), {
+          ...newRoutine,
+          userId: user.uid,
+          createdAt: new Date().toISOString()
+        });
+        setIsRoutineModalOpen(false);
+        setEditingRoutine(null);
+        setSelectedTemplateIds([]);
+      } catch (error) {
+        console.error('Error creating routine:', error);
+      }
     };
 
-    const handleUpdateRoutine = (formData: FormData) => {
-      if (!editingRoutine) return;
+    const handleUpdateRoutine = async (formData: FormData) => {
+      if (!user || !editingRoutine) return;
 
       const days: number[] = [];
       [0, 1, 2, 3, 4, 5, 6].forEach(day => {
@@ -649,17 +1032,31 @@ const FitnessHub: React.FC = () => {
         daysOfWeek: days,
         time: formData.get('time') as string
       };
-      setRoutines(prev => prev.map(r => r.id === editingRoutine.id ? updatedRoutine : r));
-      setIsRoutineModalOpen(false);
-      setEditingRoutine(null);
-      setSelectedTemplateIds([]);
+
+      try {
+        await setDoc(doc(db, 'fitness_routines', editingRoutine.id), {
+          ...updatedRoutine,
+          userId: user.uid
+        });
+        setIsRoutineModalOpen(false);
+        setEditingRoutine(null);
+        setSelectedTemplateIds([]);
+      } catch (error) {
+        console.error('Error updating routine:', error);
+      }
     };
 
-    const handleDeleteRoutine = (routineId: string) => {
-      setRoutines(prev => prev.filter(r => r.id !== routineId));
-      setIsRoutineModalOpen(false);
-      setEditingRoutine(null);
-      setSelectedTemplateIds([]);
+    const handleDeleteRoutine = async (routineId: string) => {
+      if (!user) return;
+
+      try {
+        await deleteDoc(doc(db, 'fitness_routines', routineId));
+        setIsRoutineModalOpen(false);
+        setEditingRoutine(null);
+        setSelectedTemplateIds([]);
+      } catch (error) {
+        console.error('Error deleting routine:', error);
+      }
     };
 
     const toggleTemplateSelection = (templateId: string) => {
@@ -2351,6 +2748,664 @@ const FitnessHub: React.FC = () => {
     );
   };
 
+  // ============== FASTING VIEW ==============
+  const FastingView = () => {
+    const [fastingTab, setFastingTab] = useState<'dashboard' | 'weight' | 'hydration' | 'electrolytes' | 'symptoms' | 'journal' | 'photos' | 'history' | 'safety'>('dashboard');
+
+    // If no active fast, show start screen
+    if (!fastingSession || !fastingSession.isActive) {
+      return (
+        <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-black tracking-tight">Water Fasting Tracker</h1>
+              <p className="text-text-muted mt-1 font-medium text-lg">Track your transformative fasting journey</p>
+            </div>
+            <button
+              onClick={() => setCurrentView('overview')}
+              className="px-6 py-3 rounded-2xl border border-gray-200 dark:border-gray-800 font-bold hover:bg-gray-50 dark:hover:bg-gray-800 transition-all flex items-center gap-2"
+            >
+              <span className="material-symbols-outlined text-[20px]">arrow_back</span>
+              Back to Overview
+            </button>
+          </div>
+
+          {/* Start Fast Card */}
+          <div className="max-w-2xl mx-auto w-full">
+            <div className="bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-950/30 dark:to-purple-950/30 rounded-[32px] p-12 border border-blue-100 dark:border-blue-900/50 shadow-sm text-center">
+              <div className="size-24 rounded-3xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center mx-auto mb-6">
+                <span className="material-symbols-outlined text-white text-[48px]">water_drop</span>
+              </div>
+              <h2 className="text-2xl font-black text-text-main dark:text-white mb-3">Begin Your Fasting Journey</h2>
+              <p className="text-text-muted dark:text-gray-400 mb-8 max-w-md mx-auto">
+                Track your water fast with comprehensive monitoring of stages, weight loss, hydration, symptoms, and more.
+              </p>
+              <button
+                onClick={() => setShowFastingModal(true)}
+                className="px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-2xl font-bold shadow-lg shadow-blue-500/30 hover:shadow-xl hover:scale-[1.02] active:scale-95 transition-all inline-flex items-center gap-2"
+              >
+                <span className="material-symbols-outlined">play_circle</span>
+                <span>Start Your First Fast</span>
+              </button>
+            </div>
+
+            {/* Past Fasts History */}
+            {fastingHistory.sessions.length > 0 && (
+              <div className="mt-8 bg-white dark:bg-surface-dark rounded-[32px] p-8 border border-gray-100 dark:border-gray-800">
+                <h3 className="text-xl font-bold mb-6">Past Fasting Sessions</h3>
+                <div className="space-y-4">
+                  {fastingHistory.sessions.slice(0, 3).map(session => {
+                    const duration = session.durationHours;
+                    const weightLost = session.totalWeightLost || 0;
+                    return (
+                      <div key={session.id} className="p-4 bg-background-light dark:bg-background-dark rounded-2xl">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-bold text-text-main dark:text-white">{duration} Hour Fast</p>
+                            <p className="text-xs text-text-muted mt-1">
+                              {new Date(session.startTime).toLocaleDateString()} - {new Date(session.endTime).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-green-600">-{weightLost.toFixed(1)} lbs</p>
+                            <p className="text-xs text-text-muted mt-1">Weight lost</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // Active fast - show full tracker
+    const startTime = new Date(fastingSession.startTime);
+    const endTime = new Date(fastingSession.endTime);
+    const now = new Date();
+    const elapsedMs = now.getTime() - startTime.getTime();
+    const totalMs = endTime.getTime() - startTime.getTime();
+    const elapsedHours = Math.floor(elapsedMs / (1000 * 60 * 60));
+    const elapsedMinutes = Math.floor((elapsedMs % (1000 * 60 * 60)) / (1000 * 60));
+    const remainingMs = totalMs - elapsedMs;
+    const remainingHours = Math.floor(remainingMs / (1000 * 60 * 60));
+    const remainingMinutes = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
+    const overallProgress = Math.min((elapsedMs / totalMs) * 100, 100);
+
+    const currentStage = FASTING_STAGES.find(
+      stage => elapsedHours >= stage.startHour && elapsedHours < stage.endHour
+    ) || FASTING_STAGES[FASTING_STAGES.length - 1];
+
+    const stageProgress = currentStage.endHour === 9999
+      ? 100
+      : ((elapsedHours - currentStage.startHour) / (currentStage.endHour - currentStage.startHour)) * 100;
+
+    const nextStage = FASTING_STAGES.find(stage => stage.startHour > elapsedHours);
+
+    return (
+      <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-black tracking-tight">Active Water Fast</h1>
+            <p className="text-text-muted mt-1 font-medium text-lg">Real-time progress tracking</p>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setCurrentView('overview')}
+              className="px-6 py-3 rounded-2xl border border-gray-200 dark:border-gray-800 font-bold hover:bg-gray-50 dark:hover:bg-gray-800 transition-all flex items-center gap-2"
+            >
+              <span className="material-symbols-outlined text-[20px]">arrow_back</span>
+              Back
+            </button>
+            <button
+              onClick={() => {
+                if (confirm('Are you sure you want to end this fast? Your progress will be saved to history.')) {
+                  const updatedSession = {
+                    ...fastingSession,
+                    isActive: false,
+                    completed: true,
+                    completedAt: new Date().toISOString()
+                  };
+                  // Calculate the new history
+                  const newHistory: FastingHistory = {
+                    sessions: [...fastingHistory.sessions, updatedSession],
+                    totalHoursFasted: fastingHistory.totalHoursFasted + elapsedHours,
+                    totalFastsCompleted: fastingHistory.totalFastsCompleted + 1,
+                    longestFastHours: Math.max(fastingHistory.longestFastHours, elapsedHours),
+                    totalWeightLost: fastingHistory.totalWeightLost + (fastingSession.totalWeightLost || 0),
+                    averageFastDuration: (fastingHistory.totalHoursFasted + elapsedHours) / (fastingHistory.totalFastsCompleted + 1)
+                  };
+
+                  // Update state
+                  setFastingHistory(newHistory);
+                  setFastingSession(null);
+
+                  // Save to Firestore
+                  saveFastingHistory(newHistory);
+                  saveFastingSession(null);
+
+                  setCurrentView('overview');
+                }
+              }}
+              className="px-6 py-3 rounded-2xl bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 font-bold hover:bg-red-100 dark:hover:bg-red-950/30 transition-all flex items-center gap-2"
+            >
+              <span className="material-symbols-outlined text-[20px]">stop_circle</span>
+              End Fast
+            </button>
+          </div>
+        </div>
+
+        {/* Tab Navigation */}
+        <div className="bg-white dark:bg-surface-dark rounded-2xl p-2 border border-gray-100 dark:border-gray-800 shadow-sm overflow-x-auto">
+          <div className="flex gap-2 min-w-max">
+            {[
+              { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+              { id: 'weight', label: 'Weight', icon: 'monitor_weight' },
+              { id: 'hydration', label: 'Hydration', icon: 'water_drop' },
+              { id: 'electrolytes', label: 'Electrolytes', icon: 'science' },
+              { id: 'symptoms', label: 'Symptoms', icon: 'favorite' },
+              { id: 'journal', label: 'Journal', icon: 'book' },
+              { id: 'photos', label: 'Photos', icon: 'photo_camera' },
+              { id: 'history', label: 'History', icon: 'history' },
+              { id: 'safety', label: 'Safety', icon: 'health_and_safety' }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setFastingTab(tab.id as any)}
+                className={`px-4 py-2 rounded-xl font-bold text-sm transition-all flex items-center gap-2 whitespace-nowrap ${
+                  fastingTab === tab.id
+                    ? 'bg-primary text-white shadow-lg shadow-primary/20'
+                    : 'text-text-muted dark:text-gray-400 hover:bg-background-light dark:hover:bg-background-dark'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[18px]">{tab.icon}</span>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Tab Content */}
+        {fastingTab === 'dashboard' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left Column - Progress */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Overall Progress Card */}
+              <div className="bg-white dark:bg-surface-dark rounded-[32px] p-8 border border-gray-100 dark:border-gray-800 shadow-sm">
+                <h3 className="text-xl font-bold mb-6">Overall Progress</h3>
+                <div className="space-y-6">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-bold text-text-muted">Time Elapsed</span>
+                      <span className="text-sm font-bold text-text-main dark:text-white">
+                        {elapsedHours}h {elapsedMinutes}m / {fastingSession.durationHours}h
+                      </span>
+                    </div>
+                    <div className="w-full bg-background-light dark:bg-background-dark rounded-full h-3 overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-500"
+                        style={{ width: `${overallProgress}%` }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-green-50 dark:bg-green-950/20 rounded-2xl">
+                      <p className="text-xs font-bold text-green-600 dark:text-green-400 mb-1">TIME REMAINING</p>
+                      <p className="text-2xl font-black text-green-600 dark:text-green-400">
+                        {remainingHours}h {remainingMinutes}m
+                      </p>
+                    </div>
+                    <div className="p-4 bg-purple-50 dark:bg-purple-950/20 rounded-2xl">
+                      <p className="text-xs font-bold text-purple-600 dark:text-purple-400 mb-1">END TIME</p>
+                      <p className="text-sm font-black text-purple-600 dark:text-purple-400">
+                        {endTime.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Current Stage Card */}
+              <div className="bg-white dark:bg-surface-dark rounded-[32px] p-8 border border-gray-100 dark:border-gray-800 shadow-sm">
+                <h3 className="text-xl font-bold mb-6">Current Fasting Stage</h3>
+                <div className="p-6 rounded-2xl" style={{ backgroundColor: `${currentStage.color}10` }}>
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="size-16 rounded-2xl flex items-center justify-center" style={{ backgroundColor: currentStage.color }}>
+                      <span className="material-symbols-outlined text-white text-[32px]">{currentStage.icon}</span>
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="text-xl font-black" style={{ color: currentStage.color }}>{currentStage.name}</h4>
+                      <p className="text-sm text-text-muted mt-1">{currentStage.description}</p>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-text-muted">Stage Progress</span>
+                      <span className="text-xs font-bold" style={{ color: currentStage.color }}>{Math.round(stageProgress)}%</span>
+                    </div>
+                    <div className="w-full bg-background-light dark:bg-background-dark rounded-full h-2">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${stageProgress}%`, backgroundColor: currentStage.color }}
+                      ></div>
+                    </div>
+                    {nextStage && (
+                      <p className="text-xs text-text-muted mt-2">
+                        Next: <span className="font-bold">{nextStage.name}</span> in {nextStage.startHour - elapsedHours}h
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-bold text-text-muted mb-2">Benefits You're Experiencing:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {currentStage.benefits.map((benefit, idx) => (
+                        <span
+                          key={idx}
+                          className="text-xs font-bold px-3 py-1.5 rounded-lg"
+                          style={{
+                            backgroundColor: `${currentStage.color}20`,
+                            color: currentStage.color
+                          }}
+                        >
+                          {benefit}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column - Quick Stats & Actions */}
+            <div className="space-y-6">
+              {/* Goals Card */}
+              {fastingSession.goals.length > 0 && (
+                <div className="bg-white dark:bg-surface-dark rounded-[32px] p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
+                  <h3 className="text-lg font-bold mb-4">Your Goals</h3>
+                  <div className="space-y-2">
+                    {fastingSession.goals.map(goal => {
+                      const goalInfo = [
+                        { value: 'weight-loss', label: 'Weight Loss', icon: 'trending_down' },
+                        { value: 'autophagy', label: 'Autophagy', icon: 'auto_awesome' },
+                        { value: 'mental-clarity', label: 'Mental Clarity', icon: 'psychology' },
+                        { value: 'spiritual', label: 'Spiritual', icon: 'self_improvement' },
+                        { value: 'metabolic-reset', label: 'Metabolic Reset', icon: 'refresh' },
+                        { value: 'longevity', label: 'Longevity', icon: 'favorite' },
+                        { value: 'healing', label: 'Healing', icon: 'healing' }
+                      ].find(g => g.value === goal);
+                      return goalInfo ? (
+                        <div key={goal} className="flex items-center gap-2 p-2 bg-background-light dark:bg-background-dark rounded-xl">
+                          <span className="material-symbols-outlined text-primary text-[18px]">{goalInfo.icon}</span>
+                          <span className="text-sm font-bold text-text-main dark:text-white">{goalInfo.label}</span>
+                        </div>
+                      ) : null;
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Intentions Card */}
+              {fastingSession.intentions && (
+                <div className="bg-white dark:bg-surface-dark rounded-[32px] p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
+                  <h3 className="text-lg font-bold mb-3">Your Intentions</h3>
+                  <p className="text-sm text-text-muted dark:text-gray-400 italic leading-relaxed">
+                    "{fastingSession.intentions}"
+                  </p>
+                </div>
+              )}
+
+              {/* Weight Stats */}
+              {fastingSession.startingWeight && (
+                <div className="bg-white dark:bg-surface-dark rounded-[32px] p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
+                  <h3 className="text-lg font-bold mb-4">Weight Progress</h3>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-text-muted">STARTING</span>
+                      <span className="text-lg font-black text-text-main dark:text-white">{fastingSession.startingWeight} lbs</span>
+                    </div>
+                    {fastingSession.currentWeight && fastingSession.currentWeight !== fastingSession.startingWeight && (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-text-muted">CURRENT</span>
+                          <span className="text-lg font-black text-text-main dark:text-white">{fastingSession.currentWeight} lbs</span>
+                        </div>
+                        <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-800">
+                          <span className="text-xs font-bold text-green-600 dark:text-green-400">LOST</span>
+                          <span className="text-xl font-black text-green-600 dark:text-green-400">
+                            -{(fastingSession.startingWeight - fastingSession.currentWeight).toFixed(1)} lbs
+                          </span>
+                        </div>
+                      </>
+                    )}
+                    {fastingSession.targetWeight && (
+                      <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-800">
+                        <span className="text-xs font-bold text-text-muted">TARGET</span>
+                        <span className="text-lg font-black text-purple-600 dark:text-purple-400">{fastingSession.targetWeight} lbs</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Quick Actions */}
+              <div className="bg-white dark:bg-surface-dark rounded-[32px] p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
+                <h3 className="text-lg font-bold mb-4">Quick Log</h3>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setShowWeightLogModal(true)}
+                    className="w-full p-3 bg-background-light dark:bg-background-dark rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition-all flex items-center gap-2 text-left"
+                  >
+                    <span className="material-symbols-outlined text-primary">monitor_weight</span>
+                    <span className="text-sm font-bold">Log Weight</span>
+                  </button>
+                  <button
+                    onClick={() => setFastingTab('hydration')}
+                    className="w-full p-3 bg-background-light dark:bg-background-dark rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition-all flex items-center gap-2 text-left"
+                  >
+                    <span className="material-symbols-outlined text-blue-500">water_drop</span>
+                    <span className="text-sm font-bold">Log Water</span>
+                  </button>
+                  <button
+                    onClick={() => setFastingTab('symptoms')}
+                    className="w-full p-3 bg-background-light dark:bg-background-dark rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition-all flex items-center gap-2 text-left"
+                  >
+                    <span className="material-symbols-outlined text-green-500">favorite</span>
+                    <span className="text-sm font-bold">Log Symptoms</span>
+                  </button>
+                  <button
+                    onClick={() => setFastingTab('journal')}
+                    className="w-full p-3 bg-background-light dark:bg-background-dark rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition-all flex items-center gap-2 text-left"
+                  >
+                    <span className="material-symbols-outlined text-purple-500">book</span>
+                    <span className="text-sm font-bold">Write Journal</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Other tabs - Placeholder for now */}
+        {fastingTab !== 'dashboard' && (
+          <div className="bg-white dark:bg-surface-dark rounded-[32px] p-12 border border-gray-100 dark:border-gray-800 shadow-sm text-center">
+            <span className="material-symbols-outlined text-[64px] text-primary opacity-50 mb-4 inline-block">construction</span>
+            <h3 className="text-2xl font-black mb-2">Coming Soon</h3>
+            <p className="text-text-muted">The {fastingTab} tab is under construction.</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ============== START FAST MODAL ==============
+  const StartFastModal = () => {
+    const [duration, setDuration] = useState<number>(24);
+    const [customDuration, setCustomDuration] = useState<number>(24);
+    const [startDateTime, setStartDateTime] = useState<string>(() => {
+      const now = new Date();
+      return `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}T${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    });
+    const [selectedGoals, setSelectedGoals] = useState<FastingGoal[]>([]);
+    const [intentions, setIntentions] = useState<string>('');
+    const [startingWeight, setStartingWeight] = useState<number | null>(null);
+    const [targetWeight, setTargetWeight] = useState<number | null>(null);
+
+    const goalOptions: { value: FastingGoal; label: string; description: string; icon: string }[] = [
+      { value: 'weight-loss', label: 'Weight Loss', description: 'Reduce body weight and fat', icon: 'trending_down' },
+      { value: 'autophagy', label: 'Autophagy', description: 'Cellular cleanup and regeneration', icon: 'auto_awesome' },
+      { value: 'mental-clarity', label: 'Mental Clarity', description: 'Enhanced focus and cognition', icon: 'psychology' },
+      { value: 'spiritual', label: 'Spiritual Growth', description: 'Mindfulness and inner peace', icon: 'self_improvement' },
+      { value: 'metabolic-reset', label: 'Metabolic Reset', description: 'Improve insulin sensitivity', icon: 'refresh' },
+      { value: 'longevity', label: 'Longevity', description: 'Anti-aging and health span', icon: 'favorite' },
+      { value: 'healing', label: 'Healing', description: 'Body repair and recovery', icon: 'healing' }
+    ];
+
+    const toggleGoal = (goal: FastingGoal) => {
+      setSelectedGoals(prev =>
+        prev.includes(goal) ? prev.filter(g => g !== goal) : [...prev, goal]
+      );
+    };
+
+    const calculateEndTime = () => {
+      const start = new Date(startDateTime);
+      const durationToUse = duration === 0 ? customDuration : duration;
+      const end = new Date(start.getTime() + durationToUse * 60 * 60 * 1000);
+      return end.toLocaleString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+    };
+
+    const handleStartFast = () => {
+      const start = new Date(startDateTime);
+      const durationToUse = duration === 0 ? customDuration : duration;
+      const end = new Date(start.getTime() + durationToUse * 60 * 60 * 1000);
+
+      const newSession: FastingSession = {
+        id: `fast_${Date.now()}`,
+        startTime: start.toISOString(),
+        endTime: end.toISOString(),
+        durationHours: durationToUse,
+        startingWeight: startingWeight || undefined,
+        targetWeight: targetWeight || undefined,
+        currentWeight: startingWeight || undefined,
+        goals: selectedGoals,
+        intentions,
+        weightEntries: startingWeight ? [{
+          id: `weight_${Date.now()}`,
+          timestamp: start.toISOString(),
+          weight: startingWeight,
+          notes: 'Starting weight'
+        }] : [],
+        hydrationEntries: [],
+        electrolyteEntries: [],
+        symptomEntries: [],
+        journalEntries: [],
+        progressPhotos: [],
+        isActive: true,
+        completed: false
+      };
+
+      setFastingSession(newSession);
+      saveFastingSession(newSession); // Save to Firestore
+      setShowFastingModal(false);
+
+      // Reset form
+      setDuration(24);
+      setCustomDuration(24);
+      setSelectedGoals([]);
+      setIntentions('');
+      setStartingWeight(null);
+      setTargetWeight(null);
+    };
+
+    if (!showFastingModal) return null;
+
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6 animate-in fade-in duration-300">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-xl" onClick={() => setShowFastingModal(false)}></div>
+        <div className="bg-white dark:bg-surface-dark w-full max-w-3xl max-h-[90vh] rounded-[56px] shadow-[0_32px_80px_rgba(0,0,0,0.5)] relative z-10 overflow-hidden animate-in zoom-in-95 duration-500 border border-white/10 flex flex-col">
+          {/* Header */}
+          <div className="p-6 md:p-10 border-b border-gray-50 dark:border-gray-800/50 flex items-center justify-between bg-gradient-to-r from-blue-500/5 to-purple-500/5 flex-shrink-0">
+            <div>
+              <h3 className="text-3xl font-black tracking-tighter text-text-main dark:text-white flex items-center gap-3">
+                <span className="size-12 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-white text-[28px]">water_drop</span>
+                </span>
+                Start Water Fast
+              </h3>
+              <p className="text-text-muted text-xs font-bold uppercase tracking-[0.2em] mt-1">
+                Configure your fasting journey
+              </p>
+            </div>
+            <button
+              onClick={() => setShowFastingModal(false)}
+              className="size-10 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center transition-all text-text-muted hover:text-text-main"
+            >
+              <span className="material-symbols-outlined">close</span>
+            </button>
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8">
+            {/* Duration Selection */}
+            <div>
+              <label className="block text-sm font-bold text-text-main dark:text-white mb-3">Fast Duration</label>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                {[12, 24, 48, 72].map(hrs => (
+                  <button
+                    key={hrs}
+                    type="button"
+                    onClick={() => setDuration(hrs)}
+                    className={`p-4 rounded-2xl border-2 font-bold text-sm transition-all ${
+                      duration === hrs
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700'
+                    }`}
+                  >
+                    {hrs} hours
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDuration(0)}
+                  className={`px-4 py-2 rounded-xl border-2 font-bold text-sm transition-all ${
+                    duration === 0
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700'
+                  }`}
+                >
+                  Custom
+                </button>
+                {duration === 0 && (
+                  <input
+                    type="number"
+                    value={customDuration}
+                    onChange={(e) => setCustomDuration(Number(e.target.value))}
+                    className="flex-1 px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent text-text-main dark:text-white font-bold"
+                    placeholder="Hours"
+                    min="1"
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Start Date/Time */}
+            <div>
+              <label className="block text-sm font-bold text-text-main dark:text-white mb-3">Start Date & Time</label>
+              <input
+                type="datetime-local"
+                value={startDateTime}
+                onChange={(e) => setStartDateTime(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent text-text-main dark:text-white font-bold"
+              />
+              <p className="text-xs text-text-muted mt-2">
+                End time: <span className="font-bold">{calculateEndTime()}</span>
+              </p>
+            </div>
+
+            {/* Goals Selection */}
+            <div>
+              <label className="block text-sm font-bold text-text-main dark:text-white mb-3">Fasting Goals (select all that apply)</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {goalOptions.map(goal => (
+                  <button
+                    key={goal.value}
+                    type="button"
+                    onClick={() => toggleGoal(goal.value)}
+                    className={`p-4 rounded-2xl border-2 text-left transition-all ${
+                      selectedGoals.includes(goal.value)
+                        ? 'border-primary bg-primary/10'
+                        : 'border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className={`material-symbols-outlined text-[20px] ${selectedGoals.includes(goal.value) ? 'text-primary' : 'text-text-muted'}`}>
+                        {goal.icon}
+                      </span>
+                      <div className="flex-1">
+                        <p className={`text-sm font-bold ${selectedGoals.includes(goal.value) ? 'text-primary' : 'text-text-main dark:text-white'}`}>
+                          {goal.label}
+                        </p>
+                        <p className="text-xs text-text-muted mt-1">{goal.description}</p>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Intentions */}
+            <div>
+              <label className="block text-sm font-bold text-text-main dark:text-white mb-3">Intentions (Why are you fasting?)</label>
+              <textarea
+                value={intentions}
+                onChange={(e) => setIntentions(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent text-text-main dark:text-white resize-none h-24"
+                placeholder="Write your intentions and motivations..."
+              />
+            </div>
+
+            {/* Weight Inputs */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-bold text-text-main dark:text-white mb-3">Starting Weight (lbs)</label>
+                <input
+                  type="number"
+                  value={startingWeight || ''}
+                  onChange={(e) => setStartingWeight(e.target.value ? Number(e.target.value) : null)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent text-text-main dark:text-white font-bold"
+                  placeholder="e.g., 180"
+                  step="0.1"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-text-main dark:text-white mb-3">Target Weight (lbs)</label>
+                <input
+                  type="number"
+                  value={targetWeight || ''}
+                  onChange={(e) => setTargetWeight(e.target.value ? Number(e.target.value) : null)}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent text-text-main dark:text-white font-bold"
+                  placeholder="e.g., 175"
+                  step="0.1"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="p-6 md:p-10 border-t border-gray-50 dark:border-gray-800/50 flex gap-3 flex-shrink-0">
+            <button
+              onClick={() => setShowFastingModal(false)}
+              className="flex-1 h-12 rounded-2xl border border-gray-200 dark:border-gray-800 font-bold text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleStartFast}
+              className="flex-[2] h-12 rounded-2xl bg-gradient-to-r from-blue-500 to-purple-500 text-white font-bold text-sm shadow-lg shadow-blue-500/30 hover:shadow-xl hover:scale-[1.02] active:scale-95 transition-all"
+            >
+              Start Fasting
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // ============== RENDER ==============
   const renderContent = () => {
     switch (currentView) {
@@ -2359,6 +3414,7 @@ const FitnessHub: React.FC = () => {
       case 'nutrition': return <NutritionView />;
       case 'measurements': return <MeasurementsView />;
       case 'settings': return <SettingsView />;
+      case 'fasting': return <FastingView />;
       default: return null;
     }
   };
@@ -2366,6 +3422,7 @@ const FitnessHub: React.FC = () => {
   return (
     <div className="h-full">
       {renderContent()}
+      <StartFastModal />
     </div>
   );
 };

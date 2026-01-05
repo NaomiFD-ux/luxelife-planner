@@ -1,5 +1,8 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { db } from '../firebase/firebaseConfig';
+import { useAuth } from '../contexts/AuthContext';
 
 type VisionType = 'quote' | 'image' | 'goal';
 type ImageSourceType = 'url' | 'search';
@@ -30,15 +33,9 @@ interface VisionItem {
 }
 
 const VisionBoard: React.FC = () => {
-  const [visionItems, setVisionItems] = useState<VisionItem[]>([
-    { id: '1', type: 'quote', content: 'Design a life you love.', size: 'large', color: '#fceef5', notes: 'This is my core philosophy for 2024.' },
-    { id: '2', type: 'image', url: 'https://picsum.photos/id/10/800/600', label: 'Adventure', notes: 'I want to visit at least 3 new countries this year.' },
-    { id: '3', type: 'goal', title: 'Luxury Penthouse', target: '$2.5M', progress: 45, icon: 'home', notes: 'Looking at properties in Manhattan and Dubai.', checklist: [{ id: 'cl1', text: 'Research market trends', completed: true }, { id: 'cl2', text: 'Consult financial advisor', completed: false }] },
-    { id: '4', type: 'image', url: 'https://picsum.photos/id/20/800/1200', label: 'Mindset', notes: 'Daily meditation is the key to clarity.' },
-    { id: '5', type: 'quote', content: 'Abundance is my birthright.', size: 'small', color: '#eff6ff' },
-    { id: '6', type: 'image', url: 'https://picsum.photos/id/30/800/800', label: 'Success' },
-    { id: '7', type: 'goal', title: 'World Tour', target: '12 Countries', progress: 70, icon: 'flight' },
-  ]);
+  const { user } = useAuth();
+  const [visionItems, setVisionItems] = useState<VisionItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const [selectedVision, setSelectedVision] = useState<VisionItem | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -46,6 +43,53 @@ const VisionBoard: React.FC = () => {
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const [resizingItem, setResizingItem] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
+
+  // Load vision items from Firestore
+  useEffect(() => {
+    if (!user) {
+      setVisionItems([]);
+      setLoading(false);
+      return;
+    }
+
+    const q = query(collection(db, 'vision_goals'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as VisionItem[];
+      setVisionItems(data);
+      setLoading(false);
+      localStorage.setItem('luxelife_vision_items', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading vision items:', error);
+      const saved = localStorage.getItem('luxelife_vision_items');
+      if (saved) setVisionItems(JSON.parse(saved));
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Firestore save helper
+  const saveVisionToFirestore = async (item: VisionItem) => {
+    if (!user) return;
+    try {
+      await setDoc(doc(db, 'vision_goals', item.id), {
+        ...item,
+        userId: user.uid,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error saving vision item to Firestore:', error);
+    }
+  };
+
+  const deleteVisionFromFirestore = async (itemId: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'vision_goals', itemId));
+    } catch (error) {
+      console.error('Error deleting vision item from Firestore:', error);
+    }
+  };
 
   const handleAddVision = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -68,15 +112,18 @@ const VisionBoard: React.FC = () => {
     };
 
     setVisionItems([newItem, ...visionItems]);
+    saveVisionToFirestore(newItem); // Save to Firestore
     setIsAddModalOpen(false);
   };
 
   const updateVision = (updated: VisionItem) => {
     setVisionItems(visionItems.map(item => item.id === updated.id ? updated : item));
     setSelectedVision(updated);
+    saveVisionToFirestore(updated); // Save to Firestore
   };
 
   const deleteVision = (id: string) => {
+    deleteVisionFromFirestore(id); // Delete from Firestore
     setVisionItems(visionItems.filter(item => item.id !== id));
     setActiveMenuId(null);
   };

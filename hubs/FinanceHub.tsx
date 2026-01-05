@@ -1,4 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { db } from '../firebase/firebaseConfig';
+import { useAuth } from '../contexts/AuthContext';
 
 type FinanceSubView = 'overview' | 'dashboard' | 'calendar' | 'tx' | 'savings' | 'debt' | 'settings';
 type OverviewMode = 'year' | 'month';
@@ -79,7 +83,11 @@ interface OneTimeItem {
 }
 
 const FinanceHub: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useAuth();
   const [currentView, setCurrentView] = useState<FinanceSubView>('overview');
+  const [loading, setLoading] = useState(true);
 
   // Confirmation modal state
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -108,104 +116,190 @@ const FinanceHub: React.FC = () => {
     return () => window.removeEventListener('hubSubNavChange', handleSubNav);
   }, []);
 
-  // ============== STATE MANAGEMENT WITH LOCALSTORAGE ==============
-  const [incomes, setIncomes] = useState<Income[]>(() => {
-    const saved = localStorage.getItem('luxelife_finance_incomes');
-    return saved ? JSON.parse(saved) : [
-      { id: 'i1', source: 'Primary Job', amount: 5000, frequency: 'monthly' },
-      { id: 'i2', source: 'Freelance', amount: 1500, frequency: 'monthly' },
-    ];
-  });
+  // ============== STATE MANAGEMENT WITH FIRESTORE ==============
+  const [incomes, setIncomes] = useState<Income[]>([]);
+  const [bills, setBills] = useState<Bill[]>([]);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>([]);
+  const [debts, setDebts] = useState<Debt[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
 
-  const [bills, setBills] = useState<Bill[]>(() => {
-    const saved = localStorage.getItem('luxelife_finance_bills');
-    return saved ? JSON.parse(saved) : [
-      { id: 'b1', name: 'Rent', amount: 1800, dueDate: 1, frequency: 'monthly', category: 'Housing' },
-      { id: 'b2', name: 'Electric', amount: 120, dueDate: 15, frequency: 'monthly', category: 'Utilities' },
-      { id: 'b3', name: 'Internet', amount: 80, dueDate: 10, frequency: 'monthly', category: 'Utilities' },
-      { id: 'b4', name: 'Car Insurance', amount: 150, dueDate: 5, frequency: 'monthly', category: 'Insurance' },
-    ];
-  });
-
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>(() => {
-    const saved = localStorage.getItem('luxelife_finance_subscriptions');
-    return saved ? JSON.parse(saved) : [
-      { id: 's1', name: 'Netflix', amount: 15.99, dueDate: 12, frequency: 'monthly' },
-      { id: 's2', name: 'Spotify', amount: 9.99, dueDate: 8, frequency: 'monthly' },
-      { id: 's3', name: 'Gym Membership', amount: 60, dueDate: 1, frequency: 'monthly' },
-      { id: 's4', name: 'Amazon Prime', amount: 139, dueDate: 15, frequency: 'yearly' },
-    ];
-  });
-
-  const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>(() => {
-    const saved = localStorage.getItem('luxelife_finance_savings');
-    return saved ? JSON.parse(saved) : [
-      { id: 'sg1', name: 'Emergency Fund', targetAmount: 10000, currentAmount: 7500, deadline: '2024-12-31' },
-      { id: 'sg2', name: 'Vacation', targetAmount: 5000, currentAmount: 2300, deadline: '2024-06-01' },
-    ];
-  });
-
-  const [debts, setDebts] = useState<Debt[]>(() => {
-    const saved = localStorage.getItem('luxelife_finance_debts');
-    return saved ? JSON.parse(saved) : [
-      { id: 'd1', name: 'Student Loan', totalAmount: 25000, remainingAmount: 18000, interestRate: 4.5, minimumPayment: 250, dueDate: 20 },
-      { id: 'd2', name: 'Credit Card', totalAmount: 5000, remainingAmount: 2400, interestRate: 18.9, minimumPayment: 100, dueDate: 25 },
-    ];
-  });
-
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem('luxelife_finance_transactions');
-    return saved ? JSON.parse(saved) : [
-      { id: 't1', date: '2024-10-25', description: 'Grocery Shopping', category: 'Food', amount: -85.43, type: 'expense' },
-      { id: 't2', date: '2024-10-24', description: 'Gas Station', category: 'Transportation', amount: -52.00, type: 'expense' },
-      { id: 't3', date: '2024-10-23', description: 'Freelance Payment', category: 'Income', amount: 1500, type: 'income' },
-    ];
-  });
-
-  // Save to localStorage whenever data changes
+  // Load incomes from Firestore with real-time sync
   useEffect(() => {
-    localStorage.setItem('luxelife_finance_incomes', JSON.stringify(incomes));
-  }, [incomes]);
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
+    const q = query(collection(db, 'finance_incomes'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Income[];
+      setIncomes(data);
+      localStorage.setItem('luxelife_finance_incomes', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading incomes:', error);
+      const saved = localStorage.getItem('luxelife_finance_incomes');
+      if (saved) setIncomes(JSON.parse(saved));
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load bills from Firestore with real-time sync
   useEffect(() => {
-    localStorage.setItem('luxelife_finance_bills', JSON.stringify(bills));
-  }, [bills]);
+    if (!user) return;
 
+    const q = query(collection(db, 'finance_bills'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Bill[];
+      setBills(data);
+      localStorage.setItem('luxelife_finance_bills', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading bills:', error);
+      const saved = localStorage.getItem('luxelife_finance_bills');
+      if (saved) setBills(JSON.parse(saved));
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load subscriptions from Firestore with real-time sync
   useEffect(() => {
-    localStorage.setItem('luxelife_finance_subscriptions', JSON.stringify(subscriptions));
-  }, [subscriptions]);
+    if (!user) return;
 
+    const q = query(collection(db, 'finance_subscriptions'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Subscription[];
+      setSubscriptions(data);
+      localStorage.setItem('luxelife_finance_subscriptions', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading subscriptions:', error);
+      const saved = localStorage.getItem('luxelife_finance_subscriptions');
+      if (saved) setSubscriptions(JSON.parse(saved));
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load savings goals from Firestore with real-time sync
   useEffect(() => {
-    localStorage.setItem('luxelife_finance_savings', JSON.stringify(savingsGoals));
-  }, [savingsGoals]);
+    if (!user) return;
 
+    const q = query(collection(db, 'finance_savings'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as SavingsGoal[];
+      setSavingsGoals(data);
+      setLoading(false);
+      localStorage.setItem('luxelife_finance_savings', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading savings:', error);
+      const saved = localStorage.getItem('luxelife_finance_savings');
+      if (saved) setSavingsGoals(JSON.parse(saved));
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load debts from Firestore with real-time sync
   useEffect(() => {
-    localStorage.setItem('luxelife_finance_debts', JSON.stringify(debts));
-  }, [debts]);
+    if (!user) return;
 
+    const q = query(collection(db, 'finance_debts'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Debt[];
+      setDebts(data);
+      localStorage.setItem('luxelife_finance_debts', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading debts:', error);
+      const saved = localStorage.getItem('luxelife_finance_debts');
+      if (saved) setDebts(JSON.parse(saved));
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load transactions from Firestore with real-time sync
   useEffect(() => {
-    localStorage.setItem('luxelife_finance_transactions', JSON.stringify(transactions));
-  }, [transactions]);
+    if (!user) return;
 
-  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>(() => {
-    const saved = localStorage.getItem('luxelife_finance_recurring_expenses');
-    return saved ? JSON.parse(saved) : [];
-  });
+    const q = query(collection(db, 'finance_transactions'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Transaction[];
+      setTransactions(data);
+      localStorage.setItem('luxelife_finance_transactions', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading transactions:', error);
+      const saved = localStorage.getItem('luxelife_finance_transactions');
+      if (saved) setTransactions(JSON.parse(saved));
+    });
 
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load recurring expenses from Firestore with real-time sync
   useEffect(() => {
-    localStorage.setItem('luxelife_finance_recurring_expenses', JSON.stringify(recurringExpenses));
-  }, [recurringExpenses]);
+    if (!user) return;
+
+    const q = query(collection(db, 'finance_recurring_expenses'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as RecurringExpense[];
+      setRecurringExpenses(data);
+      localStorage.setItem('luxelife_finance_recurring_expenses', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading recurring expenses:', error);
+      const saved = localStorage.getItem('luxelife_finance_recurring_expenses');
+      if (saved) setRecurringExpenses(JSON.parse(saved));
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   // One-time items storage (stored with month/year context)
   const [oneTimeItems, setOneTimeItems] = useState<OneTimeItem[]>([]);
 
-  // Calculate totals
+  // Helper: Calculate actual income for a specific month based on pay frequency
+  const calculateIncomeForMonth = (income: Income, month: number, year: number): number => {
+    if (income.frequency === 'monthly') return income.amount;
+    if (income.frequency === 'yearly') return income.amount / 12;
+
+    // For weekly, count how many times payday occurs in the month
+    if (income.frequency === 'weekly' && income.payDay) {
+      // Map day names to numbers (0 = Sunday, 6 = Saturday)
+      const dayMap: Record<string, number> = {
+        'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3,
+        'Thursday': 4, 'Friday': 5, 'Saturday': 6
+      };
+      const payDayNum = dayMap[income.payDay];
+
+      // Count how many times this day of week occurs in the month
+      const lastDay = new Date(year, month + 1, 0).getDate();
+      let count = 0;
+
+      for (let day = 1; day <= lastDay; day++) {
+        const currentDay = new Date(year, month, day);
+        if (currentDay.getDay() === payDayNum) count++;
+      }
+
+      return income.amount * count;
+    }
+
+    // For bi-weekly, use approximation (26 pays per year = ~2.17 per month)
+    // Note: To make this accurate, we'd need to track the exact first pay date
+    if (income.frequency === 'bi-weekly') {
+      return income.amount * 2.167; // Average over the year
+    }
+
+    return 0;
+  };
+
+  // Calculate totals for current month
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+
   const monthlyIncome = incomes.reduce((sum, inc) => {
-    if (inc.frequency === 'monthly') return sum + inc.amount;
-    if (inc.frequency === 'weekly') return sum + (inc.amount * 4);
-    if (inc.frequency === 'bi-weekly') return sum + (inc.amount * 2);
-    if (inc.frequency === 'yearly') return sum + (inc.amount / 12);
-    return sum;
+    return sum + calculateIncomeForMonth(inc, currentMonth, currentYear);
   }, 0);
 
   const monthlyBills = bills.reduce((sum, bill) => {
@@ -295,15 +389,22 @@ const FinanceHub: React.FC = () => {
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
-    // Mock monthly expenses data
-    const monthlyExpensesList = [
-      { id: 'e1', description: 'Grocery Shopping', category: 'Food', amount: 450, date: '15th' },
-      { id: 'e2', description: 'Gas', category: 'Transportation', amount: 80, date: '18th' },
-      { id: 'e3', description: 'Restaurant', category: 'Dining', amount: 120, date: '22nd' },
-    ];
+    // Map recurring expenses to monthly expenses list format
+    const monthlyExpensesList = recurringExpenses.map(expense => ({
+      id: expense.id,
+      description: expense.name,
+      category: expense.category || 'General',
+      amount: expense.amount,
+      date: `${expense.dueDate}th`
+    }));
 
-    // Calculate annual totals
-    const annualIncome = monthlyIncome * 12;
+    // Calculate annual totals by summing all 12 months
+    const annualIncome = months.reduce((sum, _, monthIdx) => {
+      const monthIncome = incomes.reduce((incSum, inc) => {
+        return incSum + calculateIncomeForMonth(inc, monthIdx, selectedYear);
+      }, 0);
+      return sum + monthIncome;
+    }, 0);
     const annualExpenses = monthlyExpenses * 12;
     const annualSavings = savingsGoals.reduce((sum, goal) => sum + goal.currentAmount, 0);
     const annualLeftToSpend = annualIncome - annualExpenses;
@@ -366,73 +467,89 @@ const FinanceHub: React.FC = () => {
             <div className="bg-white dark:bg-surface-dark rounded-2xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
               <h3 className="text-lg font-bold mb-4">Monthly Breakdown</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {months.map((month, idx) => (
-                  <div
-                    key={month}
-                    onClick={() => {
-                      setSelectedMonth(idx);
-                      setOverviewMode('month');
-                    }}
-                    className="bg-background-light dark:bg-background-dark rounded-xl p-4 hover:bg-primary/5 hover:border-primary/30 border-2 border-transparent transition-all cursor-pointer group"
-                  >
-                    <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-3">{month}</p>
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                        <span className="text-[10px] font-medium text-text-muted">Income</span>
-                        <span className="text-sm font-bold text-emerald-500">${monthlyIncome.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-[10px] font-medium text-text-muted">Expenses</span>
-                        <span className="text-sm font-bold text-rose-500">${monthlyExpenses.toLocaleString()}</span>
-                      </div>
-                      <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                {months.map((month, idx) => {
+                  // Calculate income for THIS specific month
+                  const monthIncome = incomes.reduce((sum, inc) => {
+                    return sum + calculateIncomeForMonth(inc, idx, selectedYear);
+                  }, 0);
+                  const monthLeft = monthIncome - monthlyExpenses;
+
+                  return (
+                    <div
+                      key={month}
+                      onClick={() => {
+                        setSelectedMonth(idx);
+                        setOverviewMode('month');
+                      }}
+                      className="bg-background-light dark:bg-background-dark rounded-xl p-4 hover:bg-primary/5 hover:border-primary/30 border-2 border-transparent transition-all cursor-pointer group"
+                    >
+                      <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-3">{month}</p>
+                      <div className="space-y-2">
                         <div className="flex justify-between items-center">
-                          <span className="text-[10px] font-bold text-text-muted">Left</span>
-                          <span className="text-sm font-black text-primary">${leftToSpend.toLocaleString()}</span>
+                          <span className="text-[10px] font-medium text-text-muted">Income</span>
+                          <span className="text-sm font-bold text-emerald-500">${monthIncome.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] font-medium text-text-muted">Expenses</span>
+                          <span className="text-sm font-bold text-rose-500">${monthlyExpenses.toLocaleString()}</span>
+                        </div>
+                        <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-bold text-text-muted">Left</span>
+                            <span className="text-sm font-black text-primary">${monthLeft.toLocaleString()}</span>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
         ) : (
           // MONTH VIEW
-          <div className="space-y-6">
-            {/* Month Navigation */}
-            <div className="flex items-center justify-center gap-4">
-              <button
-                onClick={() => setSelectedMonth(selectedMonth === 0 ? 11 : selectedMonth - 1)}
-                className="size-10 rounded-xl bg-white dark:bg-surface-dark border border-gray-100 dark:border-gray-800 flex items-center justify-center text-text-muted hover:text-primary hover:border-primary/30 transition-all"
-              >
-                <span className="material-symbols-outlined">chevron_left</span>
-              </button>
-              <div className="text-center">
-                <p className="text-2xl font-black">{months[selectedMonth]} {selectedYear}</p>
-              </div>
-              <button
-                onClick={() => setSelectedMonth(selectedMonth === 11 ? 0 : selectedMonth + 1)}
-                className="size-10 rounded-xl bg-white dark:bg-surface-dark border border-gray-100 dark:border-gray-800 flex items-center justify-center text-text-muted hover:text-primary hover:border-primary/30 transition-all"
-              >
-                <span className="material-symbols-outlined">chevron_right</span>
-              </button>
-            </div>
+          (() => {
+            // Calculate income for the SELECTED month
+            const selectedMonthIncome = incomes.reduce((sum, inc) => {
+              return sum + calculateIncomeForMonth(inc, selectedMonth, selectedYear);
+            }, 0);
+            const selectedMonthLeft = selectedMonthIncome - monthlyExpenses;
 
-            {/* Monthly Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-white dark:bg-surface-dark rounded-xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm">
-                <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Total Income</p>
-                <p className="text-2xl font-black text-emerald-500">${monthlyIncome.toLocaleString()}</p>
-              </div>
-              <div className="bg-white dark:bg-surface-dark rounded-xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm">
-                <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Total Expenses</p>
-                <p className="text-2xl font-black text-rose-500">${monthlyExpenses.toLocaleString()}</p>
-              </div>
-              <div className="bg-white dark:bg-surface-dark rounded-xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm">
-                <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Left to Spend</p>
-                <p className="text-2xl font-black text-primary">${leftToSpend.toLocaleString()}</p>
-              </div>
+            return (
+              <div className="space-y-6">
+                {/* Month Navigation */}
+                <div className="flex items-center justify-center gap-4">
+                  <button
+                    onClick={() => setSelectedMonth(selectedMonth === 0 ? 11 : selectedMonth - 1)}
+                    className="size-10 rounded-xl bg-white dark:bg-surface-dark border border-gray-100 dark:border-gray-800 flex items-center justify-center text-text-muted hover:text-primary hover:border-primary/30 transition-all"
+                  >
+                    <span className="material-symbols-outlined">chevron_left</span>
+                  </button>
+                  <div className="text-center">
+                    <p className="text-2xl font-black">{months[selectedMonth]} {selectedYear}</p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedMonth(selectedMonth === 11 ? 0 : selectedMonth + 1)}
+                    className="size-10 rounded-xl bg-white dark:bg-surface-dark border border-gray-100 dark:border-gray-800 flex items-center justify-center text-text-muted hover:text-primary hover:border-primary/30 transition-all"
+                  >
+                    <span className="material-symbols-outlined">chevron_right</span>
+                  </button>
+                </div>
+
+                {/* Monthly Summary Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-white dark:bg-surface-dark rounded-xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm">
+                    <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Total Income</p>
+                    <p className="text-2xl font-black text-emerald-500">${selectedMonthIncome.toLocaleString()}</p>
+                  </div>
+                  <div className="bg-white dark:bg-surface-dark rounded-xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm">
+                    <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Total Expenses</p>
+                    <p className="text-2xl font-black text-rose-500">${monthlyExpenses.toLocaleString()}</p>
+                  </div>
+                  <div className="bg-white dark:bg-surface-dark rounded-xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm">
+                    <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Left to Spend</p>
+                    <p className="text-2xl font-black text-primary">${selectedMonthLeft.toLocaleString()}</p>
+                  </div>
               <div className="bg-white dark:bg-surface-dark rounded-xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm">
                 <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Left to Budget</p>
                 <p className="text-2xl font-black text-text-main dark:text-white">${leftToSpend.toLocaleString()}</p>
@@ -855,7 +972,9 @@ const FinanceHub: React.FC = () => {
               </div>
             )}
           </div>
-        )}
+        );
+      })()
+    )}
       </div>
     );
   };
@@ -1306,15 +1425,25 @@ const FinanceHub: React.FC = () => {
     const handleDeleteSavingsGoal = (id: string) => {
       confirmDelete(
         'Are you sure you want to delete this savings goal?',
-        () => setSavingsGoals(savingsGoals.filter(goal => goal.id !== id))
+        async () => {
+          if (!user) return;
+          try {
+            await deleteDoc(doc(db, 'finance_savings', id));
+          } catch (error) {
+            console.error('Error deleting savings goal:', error);
+            alert('Failed to delete savings goal');
+          }
+        }
       );
     };
 
-    const handleSaveSavingsGoal = () => {
+    const handleSaveSavingsGoal = async () => {
       if (!savingsForm.name || savingsForm.targetAmount <= 0 || !savingsForm.deadline) {
         alert('Please fill in all required fields');
         return;
       }
+
+      if (!user) return;
 
       const savingsData = {
         name: savingsForm.name,
@@ -1323,23 +1452,20 @@ const FinanceHub: React.FC = () => {
         deadline: savingsForm.deadline
       };
 
-      if (editingSavingsGoal) {
-        // Update existing savings goal
-        setSavingsGoals(savingsGoals.map(goal =>
-          goal.id === editingSavingsGoal.id
-            ? { ...goal, ...savingsData }
-            : goal
-        ));
-      } else {
-        // Add new savings goal
-        const newGoal: SavingsGoal = {
-          id: `sg${Date.now()}`,
-          ...savingsData
-        };
-        setSavingsGoals([...savingsGoals, newGoal]);
-      }
+      try {
+        const goalId = editingSavingsGoal ? editingSavingsGoal.id : `sg${Date.now()}`;
+        await setDoc(doc(db, 'finance_savings', goalId), {
+          ...savingsData,
+          id: goalId,
+          userId: user.uid,
+          updatedAt: new Date().toISOString()
+        });
 
-      setShowSavingsModal(false);
+        setShowSavingsModal(false);
+      } catch (error) {
+        console.error('Error saving savings goal:', error);
+        alert('Failed to save savings goal');
+      }
     };
 
     // Calculate total savings
@@ -1668,15 +1794,25 @@ const FinanceHub: React.FC = () => {
     const handleDeleteDebt = (id: string) => {
       confirmDelete(
         'Are you sure you want to delete this debt?',
-        () => setDebts(debts.filter(debt => debt.id !== id))
+        async () => {
+          if (!user) return;
+          try {
+            await deleteDoc(doc(db, 'finance_debts', id));
+          } catch (error) {
+            console.error('Error deleting debt:', error);
+            alert('Failed to delete debt');
+          }
+        }
       );
     };
 
-    const handleSaveDebt = () => {
+    const handleSaveDebt = async () => {
       if (!debtForm.name || debtForm.totalAmount <= 0 || debtForm.minimumPayment <= 0) {
         alert('Please fill in all required fields');
         return;
       }
+
+      if (!user) return;
 
       const debtData = {
         name: debtForm.name,
@@ -1687,23 +1823,20 @@ const FinanceHub: React.FC = () => {
         dueDate: debtForm.dueDate
       };
 
-      if (editingDebt) {
-        // Update existing debt
-        setDebts(debts.map(debt =>
-          debt.id === editingDebt.id
-            ? { ...debt, ...debtData }
-            : debt
-        ));
-      } else {
-        // Add new debt
-        const newDebt: Debt = {
-          id: `d${Date.now()}`,
-          ...debtData
-        };
-        setDebts([...debts, newDebt]);
-      }
+      try {
+        const debtId = editingDebt ? editingDebt.id : `d${Date.now()}`;
+        await setDoc(doc(db, 'finance_debts', debtId), {
+          ...debtData,
+          id: debtId,
+          userId: user.uid,
+          updatedAt: new Date().toISOString()
+        });
 
-      setShowDebtModal(false);
+        setShowDebtModal(false);
+      } catch (error) {
+        console.error('Error saving debt:', error);
+        alert('Failed to save debt');
+      }
     };
 
     // Calculate totals
@@ -2416,7 +2549,21 @@ const FinanceHub: React.FC = () => {
 
   // ============== SETTINGS VIEW ==============
   const SettingsView = () => {
-    const [activeTab, setActiveTab] = useState<'income' | 'bills' | 'subscriptions' | 'expenses'>('income');
+    // Determine active tab from URL
+    const getTabFromUrl = (): 'income' | 'bills' | 'subscriptions' | 'expenses' => {
+      const path = location.pathname;
+      if (path.includes('/bills')) return 'bills';
+      if (path.includes('/subscriptions')) return 'subscriptions';
+      if (path.includes('/recurring-expenses')) return 'expenses';
+      return 'income';
+    };
+
+    const [activeTab, setActiveTab] = useState<'income' | 'bills' | 'subscriptions' | 'expenses'>(getTabFromUrl());
+
+    // Sync activeTab with URL changes
+    useEffect(() => {
+      setActiveTab(getTabFromUrl());
+    }, [location.pathname]);
 
     // Income Modal State
     const [showIncomeModal, setShowIncomeModal] = useState(false);
@@ -2448,33 +2595,40 @@ const FinanceHub: React.FC = () => {
     const handleDeleteIncome = (id: string) => {
       confirmDelete(
         'Are you sure you want to delete this income source?',
-        () => setIncomes(incomes.filter(income => income.id !== id))
+        async () => {
+          if (!user) return;
+          try {
+            await deleteDoc(doc(db, 'finance_incomes', id));
+          } catch (error) {
+            console.error('Error deleting income:', error);
+            alert('Failed to delete income');
+          }
+        }
       );
     };
 
-    const handleSaveIncome = () => {
+    const handleSaveIncome = async () => {
       if (!incomeForm.source || incomeForm.amount <= 0) {
         alert('Please fill in all required fields');
         return;
       }
 
-      if (editingIncome) {
-        // Update existing income
-        setIncomes(incomes.map(income =>
-          income.id === editingIncome.id
-            ? { ...income, ...incomeForm }
-            : income
-        ));
-      } else {
-        // Add new income
-        const newIncome: Income = {
-          id: `i${Date.now()}`,
-          ...incomeForm
-        };
-        setIncomes([...incomes, newIncome]);
-      }
+      if (!user) return;
 
-      setShowIncomeModal(false);
+      try {
+        const incomeId = editingIncome ? editingIncome.id : `i${Date.now()}`;
+        await setDoc(doc(db, 'finance_incomes', incomeId), {
+          ...incomeForm,
+          id: incomeId,
+          userId: user.uid,
+          updatedAt: new Date().toISOString()
+        });
+
+        setShowIncomeModal(false);
+      } catch (error) {
+        console.error('Error saving income:', error);
+        alert('Failed to save income');
+      }
     };
 
     // Bill Types with Emojis
@@ -2533,15 +2687,25 @@ const FinanceHub: React.FC = () => {
     const handleDeleteBill = (id: string) => {
       confirmDelete(
         'Are you sure you want to delete this bill?',
-        () => setBills(bills.filter(bill => bill.id !== id))
+        async () => {
+          if (!user) return;
+          try {
+            await deleteDoc(doc(db, 'finance_bills', id));
+          } catch (error) {
+            console.error('Error deleting bill:', error);
+            alert('Failed to delete bill');
+          }
+        }
       );
     };
 
-    const handleSaveBill = () => {
+    const handleSaveBill = async () => {
       if (!billForm.name || billForm.amount <= 0) {
         alert('Please fill in all required fields');
         return;
       }
+
+      if (!user) return;
 
       const billData = {
         name: billForm.name,
@@ -2551,23 +2715,20 @@ const FinanceHub: React.FC = () => {
         category: billForm.category
       };
 
-      if (editingBill) {
-        // Update existing bill
-        setBills(bills.map(bill =>
-          bill.id === editingBill.id
-            ? { ...bill, ...billData }
-            : bill
-        ));
-      } else {
-        // Add new bill
-        const newBill: Bill = {
-          id: `b${Date.now()}`,
-          ...billData
-        };
-        setBills([...bills, newBill]);
-      }
+      try {
+        const billId = editingBill ? editingBill.id : `b${Date.now()}`;
+        await setDoc(doc(db, 'finance_bills', billId), {
+          ...billData,
+          id: billId,
+          userId: user.uid,
+          updatedAt: new Date().toISOString()
+        });
 
-      setShowBillModal(false);
+        setShowBillModal(false);
+      } catch (error) {
+        console.error('Error saving bill:', error);
+        alert('Failed to save bill');
+      }
     };
 
     const handleBillTypeChange = (typeId: string) => {
@@ -2647,15 +2808,25 @@ const FinanceHub: React.FC = () => {
     const handleDeleteSubscription = (id: string) => {
       confirmDelete(
         'Are you sure you want to delete this subscription?',
-        () => setSubscriptions(subscriptions.filter(sub => sub.id !== id))
+        async () => {
+          if (!user) return;
+          try {
+            await deleteDoc(doc(db, 'finance_subscriptions', id));
+          } catch (error) {
+            console.error('Error deleting subscription:', error);
+            alert('Failed to delete subscription');
+          }
+        }
       );
     };
 
-    const handleSaveSubscription = () => {
+    const handleSaveSubscription = async () => {
       if (!subscriptionForm.name || subscriptionForm.amount <= 0) {
         alert('Please fill in all required fields');
         return;
       }
+
+      if (!user) return;
 
       const subscriptionData = {
         name: subscriptionForm.name,
@@ -2664,23 +2835,20 @@ const FinanceHub: React.FC = () => {
         frequency: subscriptionForm.frequency
       };
 
-      if (editingSubscription) {
-        // Update existing subscription
-        setSubscriptions(subscriptions.map(sub =>
-          sub.id === editingSubscription.id
-            ? { ...sub, ...subscriptionData }
-            : sub
-        ));
-      } else {
-        // Add new subscription
-        const newSubscription: Subscription = {
-          id: `s${Date.now()}`,
-          ...subscriptionData
-        };
-        setSubscriptions([...subscriptions, newSubscription]);
-      }
+      try {
+        const subId = editingSubscription ? editingSubscription.id : `s${Date.now()}`;
+        await setDoc(doc(db, 'finance_subscriptions', subId), {
+          ...subscriptionData,
+          id: subId,
+          userId: user.uid,
+          updatedAt: new Date().toISOString()
+        });
 
-      setShowSubscriptionModal(false);
+        setShowSubscriptionModal(false);
+      } catch (error) {
+        console.error('Error saving subscription:', error);
+        alert('Failed to save subscription');
+      }
     };
 
     const handleServiceChange = (serviceId: string) => {
@@ -2767,15 +2935,25 @@ const FinanceHub: React.FC = () => {
     const handleDeleteExpense = (id: string) => {
       confirmDelete(
         'Are you sure you want to delete this recurring expense?',
-        () => setRecurringExpenses(recurringExpenses.filter(expense => expense.id !== id))
+        async () => {
+          if (!user) return;
+          try {
+            await deleteDoc(doc(db, 'finance_recurring_expenses', id));
+          } catch (error) {
+            console.error('Error deleting recurring expense:', error);
+            alert('Failed to delete recurring expense');
+          }
+        }
       );
     };
 
-    const handleSaveExpense = () => {
+    const handleSaveExpense = async () => {
       if (!expenseForm.name || expenseForm.amount <= 0) {
         alert('Please fill in all required fields');
         return;
       }
+
+      if (!user) return;
 
       const expenseData = {
         name: expenseForm.name,
@@ -2785,23 +2963,20 @@ const FinanceHub: React.FC = () => {
         emoji: expenseForm.emoji
       };
 
-      if (editingExpense) {
-        // Update existing expense
-        setRecurringExpenses(recurringExpenses.map(expense =>
-          expense.id === editingExpense.id
-            ? { ...expense, ...expenseData }
-            : expense
-        ));
-      } else {
-        // Add new expense
-        const newExpense: RecurringExpense = {
-          id: `e${Date.now()}`,
-          ...expenseData
-        };
-        setRecurringExpenses([...recurringExpenses, newExpense]);
-      }
+      try {
+        const expenseId = editingExpense ? editingExpense.id : `e${Date.now()}`;
+        await setDoc(doc(db, 'finance_recurring_expenses', expenseId), {
+          ...expenseData,
+          id: expenseId,
+          userId: user.uid,
+          updatedAt: new Date().toISOString()
+        });
 
-      setShowExpenseModal(false);
+        setShowExpenseModal(false);
+      } catch (error) {
+        console.error('Error saving recurring expense:', error);
+        alert('Failed to save recurring expense');
+      }
     };
 
     const handleExpenseNameChange = (name: string) => {
@@ -2823,7 +2998,7 @@ const FinanceHub: React.FC = () => {
         {/* Tabs */}
         <div className="flex gap-2 bg-background-light dark:bg-background-dark rounded-xl p-1 overflow-x-auto">
           <button
-            onClick={() => setActiveTab('income')}
+            onClick={() => navigate('/finance/income')}
             className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
               activeTab === 'income' ? 'bg-emerald-500 text-white shadow-sm' : 'text-text-muted hover:text-text-main'
             }`}
@@ -2831,7 +3006,7 @@ const FinanceHub: React.FC = () => {
             Income Sources
           </button>
           <button
-            onClick={() => setActiveTab('bills')}
+            onClick={() => navigate('/finance/bills')}
             className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
               activeTab === 'bills' ? 'bg-orange-500 text-white shadow-sm' : 'text-text-muted hover:text-text-main'
             }`}
@@ -2839,7 +3014,7 @@ const FinanceHub: React.FC = () => {
             Bills
           </button>
           <button
-            onClick={() => setActiveTab('subscriptions')}
+            onClick={() => navigate('/finance/subscriptions')}
             className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
               activeTab === 'subscriptions' ? 'bg-purple-500 text-white shadow-sm' : 'text-text-muted hover:text-text-main'
             }`}
@@ -2847,7 +3022,7 @@ const FinanceHub: React.FC = () => {
             Subscriptions
           </button>
           <button
-            onClick={() => setActiveTab('expenses')}
+            onClick={() => navigate('/finance/recurring-expenses')}
             className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
               activeTab === 'expenses' ? 'bg-blue-500 text-white shadow-sm' : 'text-text-muted hover:text-text-main'
             }`}

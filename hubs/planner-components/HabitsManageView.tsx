@@ -7,9 +7,11 @@ interface HabitsManageViewProps {
   categories: Category[];
   onAddHabit: (habit: Habit) => void;
   onAddCategory: (category: Category) => void;
+  onDeleteHabit?: (habitId: string) => void;
+  onDeleteCategory?: (categoryId: string) => void;
 }
 
-const HabitsManageView: React.FC<HabitsManageViewProps> = ({ habits, categories, onAddHabit, onAddCategory }) => {
+const HabitsManageView: React.FC<HabitsManageViewProps> = ({ habits, categories, onAddHabit, onAddCategory, onDeleteHabit, onDeleteCategory }) => {
   const [newCatName, setNewCatName] = useState('');
   const [newHabitName, setNewHabitName] = useState('');
   const [newHabitGoal, setNewHabitGoal] = useState('1');
@@ -84,7 +86,7 @@ const HabitsManageView: React.FC<HabitsManageViewProps> = ({ habits, categories,
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {habits.length > 0 ? habits.map(h => (
-            <div key={h.id} className="bg-white dark:bg-surface-dark p-5 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm flex items-center justify-between hover:shadow-md transition-all">
+            <div key={h.id} className="group bg-white dark:bg-surface-dark p-5 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm flex items-center justify-between hover:shadow-md transition-all">
               <div className="flex items-center gap-4">
                 <div className="size-10 rounded-full bg-primary/10 text-primary flex items-center justify-center">
                   <span className="material-symbols-outlined text-[20px]">task_alt</span>
@@ -94,8 +96,18 @@ const HabitsManageView: React.FC<HabitsManageViewProps> = ({ habits, categories,
                   <p className="text-xs text-text-muted dark:text-gray-400 font-bold uppercase tracking-wider">{h.frequency} • {h.goal} {h.unit}</p>
                 </div>
               </div>
-              <div className="text-right">
-                <p className="text-xs font-bold text-orange-500">{h.streak} Day Streak</p>
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <p className="text-xs font-bold text-orange-500">{h.streak} Day Streak</p>
+                </div>
+                {onDeleteHabit && (
+                  <button
+                    onClick={() => onDeleteHabit(h.id)}
+                    className="size-8 rounded-full bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">delete</span>
+                  </button>
+                )}
               </div>
             </div>
           )) : (
@@ -125,9 +137,17 @@ const HabitsManageView: React.FC<HabitsManageViewProps> = ({ habits, categories,
 
         <div className="flex flex-wrap gap-4">
           {categories.length > 0 ? categories.map(c => (
-            <div key={c.id} className="flex items-center gap-3 px-5 py-3 bg-white dark:bg-surface-dark border border-gray-100 dark:border-gray-800 rounded-2xl shadow-sm hover:shadow-md hover:border-primary/50 transition-all cursor-default">
+            <div key={c.id} className="group flex items-center gap-3 px-5 py-3 bg-white dark:bg-surface-dark border border-gray-100 dark:border-gray-800 rounded-2xl shadow-sm hover:shadow-md hover:border-primary/50 transition-all cursor-default">
               <div className="size-4 rounded-full" style={{ backgroundColor: c.color }}></div>
               <span className="font-bold text-text-main dark:text-white">{c.name}</span>
+              {onDeleteCategory && (
+                <button
+                  onClick={() => onDeleteCategory(c.id)}
+                  className="ml-1 size-6 rounded-full bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100"
+                >
+                  <span className="material-symbols-outlined text-[14px]">close</span>
+                </button>
+              )}
             </div>
           )) : (
             <div className="w-full py-16 border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-2xl flex flex-col items-center justify-center text-center">

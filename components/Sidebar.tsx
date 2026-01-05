@@ -63,7 +63,6 @@ const Sidebar: React.FC = () => {
           { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
           { id: 'overview', label: 'Overview', icon: 'wysiwyg' },
           { id: 'calendar', label: 'Calendar', icon: 'calendar_month' },
-          { id: 'tx', label: 'Transactions', icon: 'receipt_long' },
           { id: 'savings', label: 'Savings', icon: 'savings' },
           { id: 'debt', label: 'Debt', icon: 'credit_card' },
           { id: 'settings', label: 'Settings', icon: 'settings' },
@@ -73,6 +72,7 @@ const Sidebar: React.FC = () => {
           { id: 'overview', label: 'Overview', icon: 'monitoring' },
           { id: 'workouts', label: 'Workouts', icon: 'fitness_center' },
           { id: 'nutrition', label: 'Nutrition', icon: 'nutrition' },
+          { id: 'fasting', label: 'Fasting', icon: 'water_drop' },
           { id: 'measurements', label: 'Measurements', icon: 'monitor_heart' },
           { id: 'settings', label: 'Settings', icon: 'settings' },
         ];
