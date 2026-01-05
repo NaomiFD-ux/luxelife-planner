@@ -2,13 +2,24 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../DashboardApp';
+import { useAuth } from '../contexts/AuthContext';
 import HubSwitcher from './HubSwitcher';
 import { HubType } from '../types';
 
 const Sidebar: React.FC = () => {
   const { activeHub } = useApp();
+  const { signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      navigate('/login');
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  };
   
   // Get active sub-view from hash (for Planner)
   const getActiveSubView = () => {
@@ -144,9 +155,12 @@ const Sidebar: React.FC = () => {
         </div>
 
         <div className="pt-6 border-t border-gray-100 dark:border-gray-800">
-          <button className="w-full flex items-center justify-center gap-2 h-12 rounded-xl bg-primary hover:bg-primary-dark text-white font-bold shadow-lg shadow-primary/20 transition-all transform active:scale-95">
-            <span className="material-symbols-outlined">add</span>
-            <span>Quick Log</span>
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center justify-center gap-2 h-12 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-red-50 dark:hover:bg-red-950/30 text-text-muted hover:text-red-600 dark:hover:text-red-400 font-bold transition-all transform active:scale-95"
+          >
+            <span className="material-symbols-outlined">logout</span>
+            <span>Log Out</span>
           </button>
         </div>
       </div>
