@@ -5,6 +5,7 @@ import { HubType, UserProfile } from './types';
 import { HUB_CONFIGS } from './constants';
 import TopBar from './components/TopBar';
 import Sidebar from './components/Sidebar';
+import MobileHubSwitcher from './components/MobileHubSwitcher';
 import { EventsProvider } from './contexts/EventsContext';
 import { GoogleCalendarProvider } from './contexts/GoogleCalendarContext';
 import { SyncSettingsProvider } from './contexts/SyncSettingsContext';
@@ -85,6 +86,8 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           {children}
         </main>
       </div>
+      {/* Mobile floating hub switcher */}
+      <MobileHubSwitcher />
     </div>
   );
 };
@@ -114,16 +117,18 @@ const DashboardApp: React.FC = () => {
   });
 
   // Sync Firebase auth user data with local profile
+  // Firebase Auth is the source of truth - always use it when available
   useEffect(() => {
     if (authUser) {
       setUser(prev => ({
         ...prev,
-        name: authUser.displayName || prev.name || 'User',
-        email: authUser.email || prev.email || '',
-        avatar: authUser.photoURL || '' // Empty string if no photo
+        // Always use Firebase Auth data when available (it's the source of truth)
+        name: authUser.displayName || 'User',
+        email: authUser.email || '',
+        avatar: authUser.photoURL || ''
       }));
     }
-  }, [authUser]);
+  }, [authUser, authUser?.displayName, authUser?.email, authUser?.photoURL]);
 
   // Save user profile to localStorage
   useEffect(() => {
