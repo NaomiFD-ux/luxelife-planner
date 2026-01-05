@@ -1,10 +1,12 @@
 
 import React, { useState } from 'react';
+import { updateProfile } from 'firebase/auth';
 import { useApp } from '../DashboardApp';
 import { HUB_CONFIGS } from '../constants';
 import { HubType } from '../types';
 import { useSyncSettings } from '../contexts/SyncSettingsContext';
 import { useGoogleCalendar } from '../contexts/GoogleCalendarContext';
+import { useAuth } from '../contexts/AuthContext';
 import GoogleCalendarSync from './GoogleCalendarSync';
 
 interface SettingsModalProps {
@@ -16,6 +18,7 @@ type SettingsTab = 'hubs' | 'general' | 'account' | 'notifications' | 'appearanc
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const { user, setUser, isDark, setIsDark, enabledHubs, setEnabledHubs } = useApp();
+  const { user: authUser } = useAuth();
   const [activeTab, setActiveTab] = useState<SettingsTab>('hubs');
   const { settings, updateSettings } = useSyncSettings();
   const { isConnected, userEmail, disconnectGoogleCalendar } = useGoogleCalendar();
@@ -24,19 +27,31 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [formName, setFormName] = useState(user.name);
   const [formEmail, setFormEmail] = useState(user.email || '');
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   // Save user profile changes
-  const handleSaveProfile = () => {
-    setUser({
-      ...user,
-      name: formName
-    });
+  const handleSaveProfile = async () => {
+    setSaveError('');
 
-    // Show success message
-    setShowSaveSuccess(true);
-    setTimeout(() => setShowSaveSuccess(false), 3000);
+    try {
+      // Update Firebase Auth profile
+      if (authUser) {
+        await updateProfile(authUser, { displayName: formName });
+      }
 
-    // TODO: Handle email and password updates
+      // Update local state
+      setUser({
+        ...user,
+        name: formName
+      });
+
+      // Show success message
+      setShowSaveSuccess(true);
+      setTimeout(() => setShowSaveSuccess(false), 3000);
+    } catch (error: any) {
+      console.error('Error updating profile:', error);
+      setSaveError(error.message || 'Failed to update profile');
+    }
   };
 
   const formatLastSync = (lastSyncTime: string | null): string => {
@@ -305,7 +320,20 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                       </div>
                       <div className="flex-1">
                         <p className="text-sm font-bold text-green-900 dark:text-green-100">Profile Updated!</p>
-                        <p className="text-xs text-green-700 dark:text-green-300">Your changes have been saved successfully.</p>
+                        <p className="text-xs text-green-700 dark:text-green-300">Your changes have been saved to your account.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Error Message */}
+                  {saveError && (
+                    <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl flex items-center gap-3">
+                      <div className="size-8 rounded-full bg-red-500 flex items-center justify-center">
+                        <span className="material-symbols-outlined text-white text-lg">error</span>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-bold text-red-900 dark:text-red-100">Error</p>
+                        <p className="text-xs text-red-700 dark:text-red-300">{saveError}</p>
                       </div>
                     </div>
                   )}
