@@ -6,6 +6,7 @@ import { HUB_CONFIGS } from './constants';
 import TopBar from './components/TopBar';
 import Sidebar from './components/Sidebar';
 import MobileHubSwitcher from './components/MobileHubSwitcher';
+import MobileSidebar from './components/MobileSidebar';
 import { EventsProvider } from './contexts/EventsContext';
 import { GoogleCalendarProvider } from './contexts/GoogleCalendarContext';
 import { SyncSettingsProvider } from './contexts/SyncSettingsContext';
@@ -86,8 +87,9 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           {children}
         </main>
       </div>
-      {/* Mobile floating hub switcher */}
+      {/* Mobile navigation */}
       <MobileHubSwitcher />
+      <MobileSidebar />
     </div>
   );
 };
