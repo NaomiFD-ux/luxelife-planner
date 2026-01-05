@@ -2,10 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '../contexts/NotificationContext';
 import { HUB_CONFIGS } from '../constants';
-import { NotificationPriority, HubType } from '../types';
+import { NotificationPriority, NotificationType, HubType } from '../types';
+import DailySummaryModal from './DailySummaryModal';
 
 const NotificationDropdown: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const {
@@ -70,6 +72,14 @@ const NotificationDropdown: React.FC = () => {
   // Handle notification click
   const handleNotificationClick = async (notification: any) => {
     await markAsRead(notification.id);
+
+    // Open summary modal for daily summary notifications
+    if (notification.type === NotificationType.DAILY_SUMMARY) {
+      setIsOpen(false);
+      setShowSummary(true);
+      return;
+    }
+
     if (notification.actionUrl) {
       navigate(notification.actionUrl);
     }
@@ -241,6 +251,9 @@ const NotificationDropdown: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* Daily Summary Modal */}
+      <DailySummaryModal isOpen={showSummary} onClose={() => setShowSummary(false)} />
     </div>
   );
 };

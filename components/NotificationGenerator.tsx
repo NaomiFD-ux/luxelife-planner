@@ -23,6 +23,7 @@ const NotificationGenerator: React.FC = () => {
     generateEventNotifications,
     generateAssignmentNotifications,
     generateInterviewNotifications,
+    generateDailySummary,
   } = useNotifications();
 
   // Track if we've already generated notifications this session
@@ -32,7 +33,16 @@ const NotificationGenerator: React.FC = () => {
     events: false,
     assignments: false,
     interviews: false,
+    dailySummary: false,
   });
+
+  // Generate daily summary on app load (once per session)
+  useEffect(() => {
+    if (!user || generatedRef.current.dailySummary) return;
+
+    generatedRef.current.dailySummary = true;
+    generateDailySummary();
+  }, [user, generateDailySummary]);
 
   // Listen to planner tasks and generate notifications
   useEffect(() => {

@@ -31,6 +31,7 @@ interface NotificationContextType {
   generateEventNotifications: (events: any[]) => Promise<void>;
   generateAssignmentNotifications: (assignments: any[]) => Promise<void>;
   generateInterviewNotifications: (interviews: any[]) => Promise<void>;
+  generateDailySummary: () => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
@@ -410,6 +411,136 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     }
   }, [user, addNotification]);
 
+  // Generate daily summary notification
+  const generateDailySummary = useCallback(async () => {
+    if (!user) return;
+
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const hour = now.getHours();
+
+    // Only generate morning summary between 6 AM and 10 AM
+    if (hour < 6 || hour > 10) return;
+
+    // Check if we already generated a summary today
+    const notificationsRef = collection(db, 'users', user.uid, 'notifications');
+    const existingQuery = query(
+      notificationsRef,
+      where('type', '==', NotificationType.DAILY_SUMMARY),
+      where('relatedId', '==', todayStr),
+      where('dismissed', '==', false)
+    );
+    const existing = await getDocs(existingQuery);
+    if (!existing.empty) return;
+
+    // Count items for today across all hubs
+    let taskCount = 0;
+    let eventCount = 0;
+    let billCount = 0;
+    let assignmentCount = 0;
+    let interviewCount = 0;
+
+    // Count tasks due today
+    const tasksQuery = query(
+      collection(db, 'planner_tasks'),
+      where('userId', '==', user.uid)
+    );
+    const tasksSnap = await getDocs(tasksQuery);
+    tasksSnap.docs.forEach(doc => {
+      const task = doc.data();
+      if (task.dueDate === todayStr && task.status !== 'Complete') {
+        taskCount++;
+      }
+    });
+
+    // Count events today
+    const eventsQuery = query(
+      collection(db, 'events'),
+      where('userId', '==', user.uid)
+    );
+    const eventsSnap = await getDocs(eventsQuery);
+    eventsSnap.docs.forEach(doc => {
+      const event = doc.data();
+      const eventDate = new Date(event.start).toISOString().split('T')[0];
+      if (eventDate === todayStr) {
+        eventCount++;
+      }
+    });
+
+    // Count bills due today
+    const billsQuery = query(
+      collection(db, 'finance_bills'),
+      where('userId', '==', user.uid)
+    );
+    const billsSnap = await getDocs(billsQuery);
+    billsSnap.docs.forEach(doc => {
+      const bill = doc.data();
+      if (bill.dueDate === todayStr && !bill.paid) {
+        billCount++;
+      }
+    });
+
+    // Count assignments due today
+    const assignmentsQuery = query(
+      collection(db, 'school_assignments'),
+      where('userId', '==', user.uid)
+    );
+    const assignmentsSnap = await getDocs(assignmentsQuery);
+    assignmentsSnap.docs.forEach(doc => {
+      const assignment = doc.data();
+      if (assignment.dueDate === todayStr && !assignment.completed) {
+        assignmentCount++;
+      }
+    });
+
+    // Count interviews today
+    const jobsQuery = query(
+      collection(db, 'job_applications'),
+      where('userId', '==', user.uid)
+    );
+    const jobsSnap = await getDocs(jobsQuery);
+    jobsSnap.docs.forEach(doc => {
+      const app = doc.data();
+      if (app.interviews) {
+        app.interviews.forEach((interview: any) => {
+          const interviewDate = new Date(interview.date).toISOString().split('T')[0];
+          if (interviewDate === todayStr) {
+            interviewCount++;
+          }
+        });
+      }
+    });
+
+    const totalCount = taskCount + eventCount + billCount + assignmentCount + interviewCount;
+
+    // Build summary message
+    const parts: string[] = [];
+    if (taskCount > 0) parts.push(`${taskCount} task${taskCount !== 1 ? 's' : ''}`);
+    if (eventCount > 0) parts.push(`${eventCount} event${eventCount !== 1 ? 's' : ''}`);
+    if (billCount > 0) parts.push(`${billCount} bill${billCount !== 1 ? 's' : ''}`);
+    if (assignmentCount > 0) parts.push(`${assignmentCount} assignment${assignmentCount !== 1 ? 's' : ''}`);
+    if (interviewCount > 0) parts.push(`${interviewCount} interview${interviewCount !== 1 ? 's' : ''}`);
+
+    const message = totalCount === 0
+      ? "You have a clear day ahead! No tasks or events scheduled."
+      : `You have ${parts.join(', ')} scheduled for today.`;
+
+    // Get greeting based on time
+    const greeting = hour < 12 ? 'Good Morning!' : 'Good Afternoon!';
+
+    await addNotification({
+      type: NotificationType.DAILY_SUMMARY,
+      title: greeting,
+      message,
+      priority: totalCount > 5 ? NotificationPriority.HIGH : NotificationPriority.MEDIUM,
+      hub: HubType.DASHBOARD,
+      actionLabel: 'View Summary',
+      relatedId: todayStr,
+      icon: 'wb_sunny',
+      expiresAt: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString(),
+    });
+  }, [user, addNotification]);
+
   const value = {
     notifications,
     unreadCount,
@@ -424,6 +555,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
     generateEventNotifications,
     generateAssignmentNotifications,
     generateInterviewNotifications,
+    generateDailySummary,
   };
 
   return (
