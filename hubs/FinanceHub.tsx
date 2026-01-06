@@ -80,6 +80,8 @@ interface OneTimeItem {
   emoji?: string;
   description?: string;
   logo?: string;
+  userId?: string;
+  createdAt?: string;
 }
 
 const FinanceHub: React.FC = () => {
@@ -259,6 +261,24 @@ const FinanceHub: React.FC = () => {
   // One-time items storage (stored with month/year context)
   const [oneTimeItems, setOneTimeItems] = useState<OneTimeItem[]>([]);
 
+  // Load one-time items from Firestore with real-time sync
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(collection(db, 'finance_onetime_items'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as OneTimeItem[];
+      setOneTimeItems(data);
+      localStorage.setItem('luxelife_finance_onetime_items', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading one-time items:', error);
+      const saved = localStorage.getItem('luxelife_finance_onetime_items');
+      if (saved) setOneTimeItems(JSON.parse(saved));
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
   // Helper: Calculate actual income for a specific month based on pay frequency
   const calculateIncomeForMonth = (income: Income, month: number, year: number): number => {
     if (income.frequency === 'monthly') return income.amount;
@@ -354,30 +374,54 @@ const FinanceHub: React.FC = () => {
     };
 
     // Handler to save one-time item
-    const handleSaveOneTimeItem = () => {
-      const newItem: OneTimeItem = {
-        id: `oti-${Date.now()}`,
-        name: oneTimeForm.name,
-        amount: oneTimeForm.amount,
-        date: oneTimeForm.date,
-        month: selectedMonth,
-        year: selectedYear,
-        type: oneTimeItemType,
-        emoji: oneTimeForm.emoji,
-        description: oneTimeForm.description,
-        logo: oneTimeForm.logo
-      };
+    const handleSaveOneTimeItem = async () => {
+      if (!user) return;
 
-      setOneTimeItems(prev => [...prev, newItem]);
-      setShowOneTimeModal(false);
-      setOneTimeForm({
-        name: '',
-        amount: 0,
-        date: new Date().getDate(),
-        emoji: '💰',
-        description: '',
-        logo: ''
-      });
+      try {
+        const itemId = `oti-${Date.now()}`;
+        const newItem: OneTimeItem = {
+          id: itemId,
+          name: oneTimeForm.name,
+          amount: oneTimeForm.amount,
+          date: oneTimeForm.date,
+          month: selectedMonth,
+          year: selectedYear,
+          type: oneTimeItemType,
+          emoji: oneTimeForm.emoji,
+          description: oneTimeForm.description,
+          logo: oneTimeForm.logo
+        };
+
+        // Save to Firebase
+        await setDoc(doc(db, 'finance_onetime_items', itemId), {
+          ...newItem,
+          userId: user.uid,
+          createdAt: new Date().toISOString()
+        });
+
+        setShowOneTimeModal(false);
+        setOneTimeForm({
+          name: '',
+          amount: 0,
+          date: new Date().getDate(),
+          emoji: '💰',
+          description: '',
+          logo: ''
+        });
+      } catch (error) {
+        console.error('Error saving one-time item:', error);
+      }
+    };
+
+    // Handler to delete one-time item
+    const handleDeleteOneTimeItem = async (itemId: string) => {
+      if (!user) return;
+
+      try {
+        await deleteDoc(doc(db, 'finance_onetime_items', itemId));
+      } catch (error) {
+        console.error('Error deleting one-time item:', error);
+      }
     };
 
     const toggleSection = (section: string) => {
