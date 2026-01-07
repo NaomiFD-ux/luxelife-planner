@@ -110,7 +110,7 @@ const MobileSidebar: React.FC = () => {
     if (activeHub === HubType.PLANNER) {
       navigate(`/planner#${id}`);
     } else {
-      window.dispatchEvent(new CustomEvent('hub-sub-nav', { detail: { subView: id } }));
+      window.dispatchEvent(new CustomEvent('hubSubNavChange', { detail: { subView: id } }));
     }
     setIsOpen(false);
   };
