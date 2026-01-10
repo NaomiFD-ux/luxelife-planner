@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useEvents } from '../contexts/EventsContext';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
@@ -86,8 +87,19 @@ interface VaultDoc {
 const JobTracker: React.FC = () => {
   const { addEvent, deleteEventsBySource, events } = useEvents();
   const { user } = useAuth();
-  const [currentView, setCurrentView] = useState<JobSubView>('dashboard');
+  const location = useLocation();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+
+  // Get current view from URL path (e.g., /jobs/applications -> applications)
+  const getViewFromPath = (): JobSubView => {
+    const pathParts = location.pathname.split('/').filter(Boolean);
+    const subView = pathParts[1]; // Second part is the sub-view
+    const validViews: JobSubView[] = ['dashboard', 'profile', 'documents', 'ai-assistant', 'applications', 'settings'];
+    return validViews.includes(subView as JobSubView) ? (subView as JobSubView) : 'dashboard';
+  };
+
+  const currentView = getViewFromPath();
   const [selectedJob, setSelectedJob] = useState<JobApplication | null>(null);
   const [activeDocTab, setActiveDocTab] = useState<DocTab>('resumes');
   const [activeAppTab, setActiveAppTab] = useState<AppDetailTab>('interview');
@@ -475,7 +487,7 @@ const JobTracker: React.FC = () => {
       });
 
       // Return to applications list
-      setCurrentView('applications');
+      navigate('/jobs/applications');
       setSelectedJob(null);
     } catch (error) {
       console.error('Error deleting application:', error);
@@ -610,16 +622,10 @@ const JobTracker: React.FC = () => {
     ));
   };
 
+  // Clear selected job when view changes via URL
   useEffect(() => {
-    const handleSubNav = (e: any) => {
-      if (e.detail && e.detail.subView) {
-        setCurrentView(e.detail.subView as JobSubView);
-        setSelectedJob(null);
-      }
-    };
-    window.addEventListener('hubSubNavChange', handleSubNav);
-    return () => window.removeEventListener('hubSubNavChange', handleSubNav);
-  }, []);
+    setSelectedJob(null);
+  }, [currentView]);
 
   // Load applications from Firestore with real-time sync
   const [applications, setApplications] = useState<JobApplication[]>([]);
@@ -786,7 +792,7 @@ const JobTracker: React.FC = () => {
             <h3 className="text-base font-bold mb-5 text-text-main dark:text-white">Active Pipelines</h3>
             <div className="flex flex-col gap-3">
               {applications.slice(0, 3).map((job) => (
-                <div key={job.id} onClick={() => { setCurrentView('applications'); setSelectedJob(job); }} className="flex items-center justify-between p-3 rounded-2xl bg-background-light dark:bg-background-dark hover:bg-primary/5 cursor-pointer transition-all group">
+                <div key={job.id} onClick={() => { navigate('/jobs/applications'); setSelectedJob(job); }} className="flex items-center justify-between p-3 rounded-2xl bg-background-light dark:bg-background-dark hover:bg-primary/5 cursor-pointer transition-all group">
                   <div className="flex items-center gap-3">
                     <img src={job.logo} className="size-9 rounded-lg" />
                     <div>
