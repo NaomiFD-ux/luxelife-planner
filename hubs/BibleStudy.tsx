@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
 import { useAuth } from '../contexts/AuthContext';
@@ -51,7 +52,18 @@ interface LibraryCategory {
 
 const BibleStudy: React.FC = () => {
   const { user } = useAuth();
-  const [currentView, setCurrentView] = useState<BibleSubView>('dashboard');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Get current view from URL path (e.g., /bible/read -> read)
+  const getViewFromPath = (): BibleSubView => {
+    const pathParts = location.pathname.split('/').filter(Boolean);
+    const subView = pathParts[1];
+    const validViews: BibleSubView[] = ['dashboard', 'read', 'plans', 'library', 'notes', 'settings'];
+    return validViews.includes(subView as BibleSubView) ? (subView as BibleSubView) : 'dashboard';
+  };
+
+  const currentView = getViewFromPath();
   const [libraryTab, setLibraryTab] = useState<LibraryTab>('categories');
   const [plansTab, setPlansTab] = useState<PlansTab>('my-plans');
   const [activeBook, setActiveBook] = useState('John 3');
@@ -281,15 +293,6 @@ const BibleStudy: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    const handleSubNav = (e: any) => {
-      if (e.detail && e.detail.subView) {
-        setCurrentView(e.detail.subView as BibleSubView);
-      }
-    };
-    window.addEventListener('hubSubNavChange', handleSubNav);
-    return () => window.removeEventListener('hubSubNavChange', handleSubNav);
-  }, []);
 
   // --- Sub-View Components ---
 
@@ -328,7 +331,7 @@ const BibleStudy: React.FC = () => {
                 "For God so loved the world, that he gave his only Son, that whoever believes in him should not perish..."
               </p>
               <button
-                onClick={() => setCurrentView('read')}
+                onClick={() => navigate('/bible/read')}
                 className="bg-primary text-white px-6 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:scale-105 transition-all flex items-center gap-2"
               >
                 Open Reader
@@ -359,7 +362,7 @@ const BibleStudy: React.FC = () => {
               </div>
             </div>
             <button
-              onClick={() => setCurrentView('plans')}
+              onClick={() => navigate('/bible/plans')}
               className="w-full py-2.5 bg-white text-primary rounded-xl font-bold text-sm"
             >
               View Plan Details
@@ -1372,7 +1375,7 @@ const BibleStudy: React.FC = () => {
                     <p className="text-white/80 text-xs leading-relaxed mb-4">Day 42: You're currently exploring the miracles in the Gospel of Mark. Keep the momentum!</p>
                   </div>
                   <div className="flex items-center gap-3">
-                     <button onClick={() => setCurrentView('read')} className="bg-white text-primary px-6 py-2.5 rounded-xl font-black text-sm shadow-xl hover:scale-105 transition-all">
+                     <button onClick={() => navigate('/bible/read')} className="bg-white text-primary px-6 py-2.5 rounded-xl font-black text-sm shadow-xl hover:scale-105 transition-all">
                        Resume: Mark 5
                      </button>
                      <button className="bg-white/10 hover:bg-white/20 backdrop-blur-md px-4 py-2.5 rounded-xl font-bold text-sm transition-all">

@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useEvents } from '../contexts/EventsContext';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase/firebaseConfig';
@@ -47,7 +48,18 @@ interface AssignmentItem {
 const SchoolHub: React.FC = () => {
   const { addEvent, updateEvent, deleteEventsBySource, events } = useEvents();
   const { user } = useAuth();
-  const [currentView, setCurrentView] = useState<SchoolSubView>('dashboard');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Get current view from URL path (e.g., /school/classes -> classes)
+  const getViewFromPath = (): SchoolSubView => {
+    const pathParts = location.pathname.split('/').filter(Boolean);
+    const subView = pathParts[1];
+    const validViews: SchoolSubView[] = ['dashboard', 'calendar', 'classes', 'assignments', 'settings'];
+    return validViews.includes(subView as SchoolSubView) ? (subView as SchoolSubView) : 'dashboard';
+  };
+
+  const currentView = getViewFromPath();
   const [loading, setLoading] = useState(true);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'overview' | 'assignments' | 'syllabus' | 'sessions'>('overview');
@@ -123,16 +135,10 @@ const SchoolHub: React.FC = () => {
     return () => unsubscribe();
   }, [user]);
 
+  // Clear selected class when view changes via URL
   useEffect(() => {
-    const handleSubNav = (e: any) => {
-      if (e.detail && e.detail.subView) {
-        setCurrentView(e.detail.subView as SchoolSubView);
-        setSelectedClassId(null);
-      }
-    };
-    window.addEventListener('hubSubNavChange', handleSubNav);
-    return () => window.removeEventListener('hubSubNavChange', handleSubNav);
-  }, []);
+    setSelectedClassId(null);
+  }, [currentView]);
 
   // Sync assignments to EventsContext
   useEffect(() => {
@@ -275,7 +281,7 @@ const SchoolHub: React.FC = () => {
       // If this was the selected class, return to dashboard
       if (selectedClassId === classId) {
         setSelectedClassId(null);
-        setCurrentView('dashboard');
+        navigate('/school/dashboard');
       }
     } catch (error) {
       console.error('Error deleting class:', error);
@@ -803,7 +809,7 @@ const SchoolHub: React.FC = () => {
                 key={cls.id}
                 onClick={() => {
                   setSelectedClassId(cls.id);
-                  setCurrentView('classes');
+                  navigate('/school/classes');
                 }}
                 className="bg-white dark:bg-surface-dark p-8 rounded-[40px] border border-gray-100 dark:border-gray-800 shadow-sm group hover:border-primary/20 transition-all cursor-pointer"
               >
