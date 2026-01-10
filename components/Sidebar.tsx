@@ -21,15 +21,28 @@ const Sidebar: React.FC = () => {
     }
   };
   
-  // Get active sub-view from hash (for Planner)
+  // Get active sub-view from pathname for all hubs
   const getActiveSubView = () => {
-    if (activeHub === HubType.PLANNER) {
-      const hash = location.hash.replace('#', '');
-      return hash || 'planner';
+    // Extract the sub-view from the path (e.g., /finance/overview -> overview)
+    const pathParts = location.pathname.split('/').filter(Boolean);
+    const subView = pathParts[1]; // Second part is the sub-view
+
+    if (!subView) {
+      // Return default view for each hub
+      switch (activeHub) {
+        case HubType.PLANNER: return 'planner';
+        case HubType.FINANCE: return 'dashboard';
+        case HubType.FITNESS: return 'overview';
+        case HubType.SCHOOL: return 'dashboard';
+        case HubType.JOBS: return 'dashboard';
+        case HubType.BIBLE: return 'dashboard';
+        case HubType.MEALS: return 'dashboard';
+        default: return 'home';
+      }
     }
-    return '';
+    return subView;
   };
-  
+
   const activeSubView = getActiveSubView();
   
   const getSubNav = () => {
@@ -104,14 +117,22 @@ const Sidebar: React.FC = () => {
   };
 
   const handleSubNavClick = (id: string) => {
-    // For Planner hub, use hash navigation
-    if (activeHub === HubType.PLANNER) {
-      navigate(`/planner#${id}`);
-    } else {
-      // For other hubs, use custom event
-      const event = new CustomEvent('hubSubNavChange', { detail: { subView: id } });
-      window.dispatchEvent(event);
-    }
+    // Get the current path for the hub
+    const hubPaths: Record<HubType, string> = {
+      [HubType.DASHBOARD]: '/dashboard',
+      [HubType.FINANCE]: '/finance',
+      [HubType.CALENDAR]: '/calendar',
+      [HubType.FITNESS]: '/fitness',
+      [HubType.PLANNER]: '/planner',
+      [HubType.MEALS]: '/meals',
+      [HubType.VISION]: '/vision',
+      [HubType.BIBLE]: '/bible',
+      [HubType.JOBS]: '/jobs',
+      [HubType.SCHOOL]: '/school',
+    };
+
+    // Use path-based navigation for all hubs (e.g., /finance/overview)
+    navigate(`${hubPaths[activeHub]}/${id}`);
   };
 
   return (
@@ -123,7 +144,7 @@ const Sidebar: React.FC = () => {
           <p className="text-[10px] font-bold text-text-muted uppercase tracking-[0.15em] mb-4 px-2">Navigation</p>
           <nav className="flex flex-col gap-1">
             {getSubNav().map((item) => {
-              const isActive = activeHub === HubType.PLANNER && activeSubView === item.id;
+              const isActive = activeSubView === item.id;
               return (
                 <button 
                   key={item.id}

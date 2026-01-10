@@ -49,6 +49,15 @@ interface SavingsGoal {
   deadline: string;
 }
 
+interface SavingsLog {
+  id: string;
+  savingsGoalId: string;
+  amount: number;
+  date: string;
+  note?: string;
+  runningTotal: number;
+}
+
 interface Debt {
   id: string;
   name: string;
@@ -88,8 +97,29 @@ const FinanceHub: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const [currentView, setCurrentView] = useState<FinanceSubView>('overview');
   const [loading, setLoading] = useState(true);
+
+  // Get current view from URL path (e.g., /finance/overview -> overview)
+  const getViewFromPath = (): FinanceSubView => {
+    const pathParts = location.pathname.split('/').filter(Boolean);
+    const subView = pathParts[1]; // Second part is the sub-view (e.g., "overview")
+    const validViews: FinanceSubView[] = ['overview', 'dashboard', 'calendar', 'tx', 'savings', 'debt', 'settings'];
+
+    // Settings sub-paths (income, bills, subscriptions, recurring-expenses) should render settings view
+    const settingsSubPaths = ['income', 'bills', 'subscriptions', 'recurring-expenses'];
+    if (settingsSubPaths.includes(subView)) {
+      return 'settings';
+    }
+
+    return validViews.includes(subView as FinanceSubView) ? (subView as FinanceSubView) : 'dashboard';
+  };
+
+  const currentView = getViewFromPath();
+
+  // Helper function to navigate to a sub-view
+  const setCurrentView = (view: FinanceSubView) => {
+    navigate(`/finance/${view}`, { replace: true });
+  };
 
   // Confirmation modal state
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -108,21 +138,12 @@ const FinanceHub: React.FC = () => {
     setConfirmAction(null);
   };
 
-  useEffect(() => {
-    const handleSubNav = (e: any) => {
-      if (e.detail && e.detail.subView) {
-        setCurrentView(e.detail.subView as FinanceSubView);
-      }
-    };
-    window.addEventListener('hubSubNavChange', handleSubNav);
-    return () => window.removeEventListener('hubSubNavChange', handleSubNav);
-  }, []);
-
   // ============== STATE MANAGEMENT WITH FIRESTORE ==============
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [bills, setBills] = useState<Bill[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>([]);
+  const [savingsLogs, setSavingsLogs] = useState<SavingsLog[]>([]);
   const [debts, setDebts] = useState<Debt[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
@@ -199,6 +220,26 @@ const FinanceHub: React.FC = () => {
       const saved = localStorage.getItem('luxelife_finance_savings');
       if (saved) setSavingsGoals(JSON.parse(saved));
       setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Load savings logs from Firestore with real-time sync
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(collection(db, 'finance_savings_logs'), where('userId', '==', user.uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as SavingsLog[];
+      // Sort by date descending (newest first)
+      data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setSavingsLogs(data);
+      localStorage.setItem('luxelife_finance_savings_logs', JSON.stringify(data));
+    }, (error) => {
+      console.error('Firestore error loading savings logs:', error);
+      const saved = localStorage.getItem('luxelife_finance_savings_logs');
+      if (saved) setSavingsLogs(JSON.parse(saved));
     });
 
     return () => unsubscribe();
@@ -335,21 +376,68 @@ const FinanceHub: React.FC = () => {
 
   // ============== OVERVIEW VIEW ==============
   const OverviewView = () => {
-    const [overviewMode, setOverviewMode] = useState<OverviewMode>('year');
-    const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth()); // 0-11
+    const navigate = useNavigate();
+    const location = useLocation();
+
+    // Month abbreviations for URL
+    const monthAbbrevs = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+    // Parse URL to get current state
+    const getStateFromUrl = () => {
+      const pathParts = location.pathname.split('/').filter(Boolean);
+      // Path format: /finance/overview or /finance/overview/jan
+      if (pathParts.length >= 3 && pathParts[1] === 'overview') {
+        const monthAbbrev = pathParts[2]?.toLowerCase();
+        const monthIndex = monthAbbrevs.indexOf(monthAbbrev);
+        if (monthIndex !== -1) {
+          return { mode: 'month' as OverviewMode, month: monthIndex };
+        }
+      }
+      return { mode: 'year' as OverviewMode, month: new Date().getMonth() };
+    };
+
+    const urlState = getStateFromUrl();
+    const [overviewMode, setOverviewModeState] = useState<OverviewMode>(urlState.mode);
+    const [selectedMonth, setSelectedMonthState] = useState(urlState.month);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+    // Sync state with URL on location change
+    useEffect(() => {
+      const state = getStateFromUrl();
+      setOverviewModeState(state.mode);
+      if (state.mode === 'month') {
+        setSelectedMonthState(state.month);
+      }
+    }, [location.pathname]);
+
+    // Custom setters that update URL
+    const setOverviewMode = (mode: OverviewMode) => {
+      if (mode === 'year') {
+        navigate('/finance/overview');
+      } else {
+        navigate(`/finance/overview/${monthAbbrevs[selectedMonth]}`);
+      }
+    };
+
+    const setSelectedMonth = (month: number) => {
+      setSelectedMonthState(month);
+      if (overviewMode === 'month') {
+        navigate(`/finance/overview/${monthAbbrevs[month]}`);
+      }
+    };
     const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
-      income: false,
-      bills: false,
-      subscriptions: false,
-      expenses: false,
-      debt: false,
-      savings: false,
+      income: true,
+      bills: true,
+      subscriptions: true,
+      expenses: true,
+      debt: true,
+      savings: true,
     });
 
     // One-time items state
     const [showOneTimeModal, setShowOneTimeModal] = useState(false);
     const [oneTimeItemType, setOneTimeItemType] = useState<'bill' | 'expense' | 'subscription' | 'income' | 'savings'>('expense');
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [oneTimeForm, setOneTimeForm] = useState({
       name: '',
       amount: 0,
@@ -442,16 +530,33 @@ const FinanceHub: React.FC = () => {
       date: `${expense.dueDate}th`
     }));
 
-    // Calculate annual totals by summing all 12 months
+    // Calculate annual totals by summing all 12 months (including one-time items)
     const annualIncome = months.reduce((sum, _, monthIdx) => {
       const monthIncome = incomes.reduce((incSum, inc) => {
         return incSum + calculateIncomeForMonth(inc, monthIdx, selectedYear);
       }, 0);
-      return sum + monthIncome;
+      // Add one-time income for this month
+      const oneTimeIncomeForMonth = oneTimeItems
+        .filter(item => item.month === monthIdx && item.year === selectedYear && (item.type === 'income' || item.type === 'savings'))
+        .reduce((s, item) => s + item.amount, 0);
+      return sum + monthIncome + oneTimeIncomeForMonth;
     }, 0);
-    const annualExpenses = monthlyExpenses * 12;
-    const annualSavings = savingsGoals.reduce((sum, goal) => sum + goal.currentAmount, 0);
-    const annualLeftToSpend = annualIncome - annualExpenses;
+
+    // Calculate annual expenses including one-time items
+    const annualOneTimeExpenses = oneTimeItems
+      .filter(item => item.year === selectedYear && (item.type === 'bill' || item.type === 'expense' || item.type === 'subscription'))
+      .reduce((sum, item) => sum + item.amount, 0);
+    const annualExpenses = (monthlyExpenses * 12) + annualOneTimeExpenses;
+
+    // Calculate annual savings contributions from logs (money set aside this year)
+    const annualSavingsContributions = savingsLogs
+      .filter(log => {
+        const logDate = new Date(log.date);
+        return logDate.getFullYear() === selectedYear;
+      })
+      .reduce((sum, log) => sum + log.amount, 0);
+
+    const annualLeftToSpend = annualIncome - annualExpenses - annualSavingsContributions;
 
     return (
       <div className="flex flex-col gap-6 animate-in fade-in duration-700">
@@ -498,8 +603,8 @@ const FinanceHub: React.FC = () => {
                 <p className="text-3xl font-black">${annualExpenses.toLocaleString()}</p>
               </div>
               <div className="bg-gradient-to-br from-blue-500 to-cyan-500 text-white rounded-2xl p-6 shadow-lg">
-                <p className="text-xs font-bold uppercase tracking-wider opacity-90 mb-2">Annual Savings</p>
-                <p className="text-3xl font-black">${annualSavings.toLocaleString()}</p>
+                <p className="text-xs font-bold uppercase tracking-wider opacity-90 mb-2">Saved This Year</p>
+                <p className="text-3xl font-black">${annualSavingsContributions.toLocaleString()}</p>
               </div>
               <div className="bg-gradient-to-br from-purple-500 to-indigo-500 text-white rounded-2xl p-6 shadow-lg">
                 <p className="text-xs font-bold uppercase tracking-wider opacity-90 mb-2">Left to Spend</p>
@@ -512,18 +617,36 @@ const FinanceHub: React.FC = () => {
               <h3 className="text-lg font-bold mb-4">Monthly Breakdown</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {months.map((month, idx) => {
-                  // Calculate income for THIS specific month
-                  const monthIncome = incomes.reduce((sum, inc) => {
+                  // Calculate income for THIS specific month (including one-time income)
+                  const baseMonthIncome = incomes.reduce((sum, inc) => {
                     return sum + calculateIncomeForMonth(inc, idx, selectedYear);
                   }, 0);
-                  const monthLeft = monthIncome - monthlyExpenses;
+                  const oneTimeIncomeThisMonth = oneTimeItems
+                    .filter(item => item.month === idx && item.year === selectedYear && (item.type === 'income' || item.type === 'savings'))
+                    .reduce((sum, item) => sum + item.amount, 0);
+                  const monthIncome = baseMonthIncome + oneTimeIncomeThisMonth;
+
+                  // Calculate expenses for THIS specific month (including one-time expenses)
+                  const oneTimeExpensesThisMonth = oneTimeItems
+                    .filter(item => item.month === idx && item.year === selectedYear && (item.type === 'bill' || item.type === 'expense' || item.type === 'subscription'))
+                    .reduce((sum, item) => sum + item.amount, 0);
+                  const monthExpenses = monthlyExpenses + oneTimeExpensesThisMonth;
+
+                  // Calculate savings contributions for THIS specific month
+                  const monthSavings = savingsLogs
+                    .filter(log => {
+                      const logDate = new Date(log.date);
+                      return logDate.getMonth() === idx && logDate.getFullYear() === selectedYear;
+                    })
+                    .reduce((sum, log) => sum + log.amount, 0);
+
+                  const monthLeft = monthIncome - monthExpenses - monthSavings;
 
                   return (
                     <div
                       key={month}
                       onClick={() => {
-                        setSelectedMonth(idx);
-                        setOverviewMode('month');
+                        navigate(`/finance/overview/${monthAbbrevs[idx]}`);
                       }}
                       className="bg-background-light dark:bg-background-dark rounded-xl p-4 hover:bg-primary/5 hover:border-primary/30 border-2 border-transparent transition-all cursor-pointer group"
                     >
@@ -535,8 +658,14 @@ const FinanceHub: React.FC = () => {
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-[10px] font-medium text-text-muted">Expenses</span>
-                          <span className="text-sm font-bold text-rose-500">${monthlyExpenses.toLocaleString()}</span>
+                          <span className="text-sm font-bold text-rose-500">${monthExpenses.toLocaleString()}</span>
                         </div>
+                        {monthSavings > 0 && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-medium text-text-muted">Savings</span>
+                            <span className="text-sm font-bold text-blue-500">${monthSavings.toLocaleString()}</span>
+                          </div>
+                        )}
                         <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
                           <div className="flex justify-between items-center">
                             <span className="text-[10px] font-bold text-text-muted">Left</span>
@@ -557,7 +686,28 @@ const FinanceHub: React.FC = () => {
             const selectedMonthIncome = incomes.reduce((sum, inc) => {
               return sum + calculateIncomeForMonth(inc, selectedMonth, selectedYear);
             }, 0);
-            const selectedMonthLeft = selectedMonthIncome - monthlyExpenses;
+
+            // Calculate one-time items for the selected month
+            const oneTimeItemsForMonth = oneTimeItems.filter(item => item.month === selectedMonth && item.year === selectedYear);
+            const oneTimeIncome = oneTimeItemsForMonth
+              .filter(item => item.type === 'income' || item.type === 'savings')
+              .reduce((sum, item) => sum + item.amount, 0);
+            const oneTimeExpenses = oneTimeItemsForMonth
+              .filter(item => item.type === 'bill' || item.type === 'expense' || item.type === 'subscription')
+              .reduce((sum, item) => sum + item.amount, 0);
+
+            // Calculate savings contributions for the selected month
+            const monthSavingsContributions = savingsLogs
+              .filter(log => {
+                const logDate = new Date(log.date);
+                return logDate.getMonth() === selectedMonth && logDate.getFullYear() === selectedYear;
+              })
+              .reduce((sum, log) => sum + log.amount, 0);
+
+            // Total income and expenses including one-time items
+            const totalMonthlyIncome = selectedMonthIncome + oneTimeIncome;
+            const totalMonthlyExpenses = monthlyExpenses + oneTimeExpenses;
+            const selectedMonthLeft = totalMonthlyIncome - totalMonthlyExpenses - monthSavingsContributions;
 
             return (
               <div className="space-y-6">
@@ -581,24 +731,26 @@ const FinanceHub: React.FC = () => {
                 </div>
 
                 {/* Monthly Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="bg-white dark:bg-surface-dark rounded-xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm">
                     <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Total Income</p>
-                    <p className="text-2xl font-black text-emerald-500">${selectedMonthIncome.toLocaleString()}</p>
+                    <p className="text-2xl font-black text-emerald-500">${totalMonthlyIncome.toLocaleString()}</p>
+                    {oneTimeIncome > 0 && <p className="text-xs text-text-muted mt-1">+${oneTimeIncome.toLocaleString()} one-time</p>}
                   </div>
                   <div className="bg-white dark:bg-surface-dark rounded-xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm">
                     <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Total Expenses</p>
-                    <p className="text-2xl font-black text-rose-500">${monthlyExpenses.toLocaleString()}</p>
+                    <p className="text-2xl font-black text-rose-500">${totalMonthlyExpenses.toLocaleString()}</p>
+                    {oneTimeExpenses > 0 && <p className="text-xs text-text-muted mt-1">+${oneTimeExpenses.toLocaleString()} one-time</p>}
+                  </div>
+                  <div className="bg-white dark:bg-surface-dark rounded-xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm">
+                    <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Saved</p>
+                    <p className="text-2xl font-black text-blue-500">${monthSavingsContributions.toLocaleString()}</p>
                   </div>
                   <div className="bg-white dark:bg-surface-dark rounded-xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm">
                     <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Left to Spend</p>
                     <p className="text-2xl font-black text-primary">${selectedMonthLeft.toLocaleString()}</p>
                   </div>
-              <div className="bg-white dark:bg-surface-dark rounded-xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm">
-                <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Left to Budget</p>
-                <p className="text-2xl font-black text-text-main dark:text-white">${leftToSpend.toLocaleString()}</p>
-              </div>
-            </div>
+                </div>
 
             {/* Add Item Button */}
             <div className="flex justify-end mb-4">
@@ -808,6 +960,47 @@ const FinanceHub: React.FC = () => {
                 )}
               </div>
 
+              {/* One-Time Items Section */}
+              {oneTimeItems.filter(item => item.month === selectedMonth && item.year === selectedYear).length > 0 && (
+                <div className="bg-white dark:bg-surface-dark rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden">
+                  <div className="p-6">
+                    <h3 className="text-lg font-bold flex items-center gap-2 mb-4">
+                      <span className="material-symbols-outlined text-amber-500">event_note</span>
+                      One-Time Items for {months[selectedMonth]}
+                    </h3>
+                    <div className="space-y-2">
+                      {oneTimeItems
+                        .filter(item => item.month === selectedMonth && item.year === selectedYear)
+                        .map(item => (
+                          <div key={item.id} className="flex justify-between items-center p-3 rounded-xl bg-background-light dark:bg-background-dark group">
+                            <div className="flex items-center gap-3">
+                              <span className="text-xl">{item.emoji || '💰'}</span>
+                              <div>
+                                <p className="text-sm font-bold">{item.name}</p>
+                                <p className="text-xs text-text-muted capitalize">
+                                  {item.type} • {months[item.month]} {item.date}
+                                  {item.description && ` • ${item.description}`}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={`text-sm font-black ${item.type === 'income' || item.type === 'savings' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                {item.type === 'income' || item.type === 'savings' ? '+' : '-'}${item.amount.toLocaleString()}
+                              </span>
+                              <button
+                                onClick={() => handleDeleteOneTimeItem(item.id)}
+                                className="opacity-0 group-hover:opacity-100 size-8 rounded-lg hover:bg-red-100 dark:hover:bg-red-950/30 flex items-center justify-center transition-all"
+                              >
+                                <span className="material-symbols-outlined text-red-500 text-sm">delete</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Debt Section */}
               <div className="bg-white dark:bg-surface-dark rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden">
                 <button
@@ -883,6 +1076,7 @@ const FinanceHub: React.FC = () => {
                   </div>
                 )}
               </div>
+
             </div>
 
             {/* One-Time Item Modal */}
@@ -909,77 +1103,91 @@ const FinanceHub: React.FC = () => {
 
                   {/* Modal Body */}
                   <div className="p-6 space-y-4">
-                    {/* Name Field */}
+                    {/* Name Field with Icon */}
                     <div>
                       <label className="block text-sm font-bold text-text-main dark:text-white mb-2">
                         {oneTimeItemType === 'income' ? 'Source' : 'Name'}
                       </label>
-                      <input
-                        type="text"
-                        value={oneTimeForm.name}
-                        onChange={(e) => setOneTimeForm(prev => ({ ...prev, name: e.target.value }))}
-                        className="w-full px-4 py-2.5 bg-background-light dark:bg-background-dark border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 text-text-main dark:text-white"
-                        placeholder={oneTimeItemType === 'income' ? 'e.g., Bonus Payment' : `e.g., ${oneTimeItemType === 'bill' ? 'Car Repair' : oneTimeItemType === 'expense' ? 'Holiday Shopping' : oneTimeItemType === 'subscription' ? 'Annual Software License' : 'Emergency Fund Deposit'}`}
-                      />
-                    </div>
-
-                    {/* Amount Field */}
-                    <div>
-                      <label className="block text-sm font-bold text-text-main dark:text-white mb-2">
-                        Amount
-                      </label>
-                      <div className="relative">
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted">$</span>
+                      <div className="flex items-center gap-3">
+                        {/* Icon Picker Button */}
+                        {(oneTimeItemType === 'expense' || oneTimeItemType === 'bill') && (
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                              className="size-12 rounded-xl bg-background-light dark:bg-background-dark border border-gray-200 dark:border-gray-700 flex items-center justify-center text-2xl hover:border-primary transition-colors"
+                            >
+                              {oneTimeForm.emoji}
+                            </button>
+                            {/* Emoji Picker Popup */}
+                            {showEmojiPicker && (
+                              <div className="absolute top-full left-0 mt-2 p-3 bg-white dark:bg-surface-dark rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 z-10 w-64">
+                                <p className="text-xs font-bold text-text-muted mb-2">Choose Icon</p>
+                                <div className="grid grid-cols-6 gap-2">
+                                  {['💰', '🛒', '🍕', '⛽', '💊', '🎬', '✈️', '🎁', '🏠', '💡', '🚗', '📱', '👕', '📚', '🎮', '☕', '💳', '🏥', '🎓', '🛠️', '💼', '🎨', '🏋️', '🎵'].map(emoji => (
+                                    <button
+                                      key={emoji}
+                                      type="button"
+                                      onClick={() => {
+                                        setOneTimeForm(prev => ({ ...prev, emoji }));
+                                        setShowEmojiPicker(false);
+                                      }}
+                                      className={`size-9 rounded-lg flex items-center justify-center text-lg transition-all hover:bg-primary/10 ${oneTimeForm.emoji === emoji ? 'bg-primary/20 ring-2 ring-primary' : 'bg-background-light dark:bg-background-dark'}`}
+                                    >
+                                      {emoji}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         <input
-                          type="number"
-                          value={oneTimeForm.amount || ''}
-                          onChange={(e) => setOneTimeForm(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))}
-                          className="w-full pl-8 pr-4 py-2.5 bg-background-light dark:bg-background-dark border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 text-text-main dark:text-white"
-                          placeholder="0.00"
-                          step="0.01"
+                          type="text"
+                          value={oneTimeForm.name}
+                          onChange={(e) => setOneTimeForm(prev => ({ ...prev, name: e.target.value }))}
+                          className="flex-1 px-4 py-2.5 bg-background-light dark:bg-background-dark border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 text-text-main dark:text-white"
+                          placeholder={oneTimeItemType === 'income' ? 'e.g., Bonus Payment' : `e.g., ${oneTimeItemType === 'bill' ? 'Car Repair' : oneTimeItemType === 'expense' ? 'Holiday Shopping' : oneTimeItemType === 'subscription' ? 'Annual Software License' : 'Emergency Fund Deposit'}`}
                         />
                       </div>
                     </div>
 
-                    {/* Date Field */}
-                    <div>
-                      <label className="block text-sm font-bold text-text-main dark:text-white mb-2">
-                        Date
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="31"
-                        value={oneTimeForm.date}
-                        onChange={(e) => setOneTimeForm(prev => ({ ...prev, date: parseInt(e.target.value) || 1 }))}
-                        className="w-full px-4 py-2.5 bg-background-light dark:bg-background-dark border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 text-text-main dark:text-white"
-                      />
-                    </div>
-
-                    {/* Emoji Picker (for expenses and bills) */}
-                    {(oneTimeItemType === 'expense' || oneTimeItemType === 'bill') && (
+                    {/* Amount and Date Row */}
+                    <div className="grid grid-cols-2 gap-4">
+                      {/* Amount Field */}
                       <div>
                         <label className="block text-sm font-bold text-text-main dark:text-white mb-2">
-                          Icon
+                          Amount
                         </label>
-                        <div className="flex items-center gap-3">
-                          <div className="size-12 rounded-xl bg-background-light dark:bg-background-dark border border-gray-200 dark:border-gray-700 flex items-center justify-center text-2xl">
-                            {oneTimeForm.emoji}
-                          </div>
-                          <div className="flex-1 grid grid-cols-8 gap-2">
-                            {['💰', '🛒', '🍕', '⛽', '💊', '🎬', '✈️', '🎁', '🏠', '💡', '🚗', '📱', '👕', '📚', '🎮', '☕'].map(emoji => (
-                              <button
-                                key={emoji}
-                                onClick={() => setOneTimeForm(prev => ({ ...prev, emoji }))}
-                                className={`size-10 rounded-lg flex items-center justify-center text-xl transition-all hover:bg-primary/10 ${oneTimeForm.emoji === emoji ? 'bg-primary/20 ring-2 ring-primary' : 'bg-background-light dark:bg-background-dark'}`}
-                              >
-                                {emoji}
-                              </button>
-                            ))}
-                          </div>
+                        <div className="relative">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted">$</span>
+                          <input
+                            type="number"
+                            value={oneTimeForm.amount || ''}
+                            onChange={(e) => setOneTimeForm(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))}
+                            className="w-full pl-8 pr-4 py-2.5 bg-background-light dark:bg-background-dark border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 text-text-main dark:text-white"
+                            placeholder="0.00"
+                            step="0.01"
+                          />
                         </div>
                       </div>
-                    )}
+
+                      {/* Date Field with Date Picker */}
+                      <div>
+                        <label className="block text-sm font-bold text-text-main dark:text-white mb-2">
+                          Date
+                        </label>
+                        <input
+                          type="date"
+                          value={`${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(oneTimeForm.date).padStart(2, '0')}`}
+                          onChange={(e) => {
+                            const date = new Date(e.target.value);
+                            setOneTimeForm(prev => ({ ...prev, date: date.getDate() }));
+                          }}
+                          className="w-full px-4 py-2.5 bg-background-light dark:bg-background-dark border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 text-text-main dark:text-white"
+                        />
+                      </div>
+                    </div>
 
                     {/* Description Field */}
                     <div>
@@ -1034,7 +1242,17 @@ const FinanceHub: React.FC = () => {
       const diff = today.getDate() - day;
       return new Date(today.setDate(diff));
     });
-    const [selectedDay, setSelectedDay] = useState<number | null>(null);
+    // Default to today's date when viewing current month
+    const today = new Date();
+    const [selectedDay, setSelectedDay] = useState<number | null>(() => {
+      const todayMonth = today.getMonth();
+      const todayYear = today.getFullYear();
+      // Only pre-select today if we're viewing the current month
+      if (currentMonth === todayMonth && currentYear === todayYear) {
+        return today.getDate();
+      }
+      return null;
+    });
 
     const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -1063,31 +1281,55 @@ const FinanceHub: React.FC = () => {
     }
 
     // Get items due on a specific day
-    const getItemsForDay = (day: number) => {
+    const getItemsForDay = (day: number, month?: number, year?: number) => {
+      const targetMonth = month ?? currentMonth;
+      const targetYear = year ?? currentYear;
       const billsOnDay = bills.filter(b => b.dueDate === day);
       const subsOnDay = subscriptions.filter(s => s.dueDate === day);
       const debtsOnDay = debts.filter(d => d.dueDate === day);
-      return { bills: billsOnDay, subscriptions: subsOnDay, debts: debtsOnDay };
+      const expensesOnDay = recurringExpenses.filter(e => e.dueDate === day);
+      const oneTimeOnDay = oneTimeItems.filter(item =>
+        item.date === day && item.month === targetMonth && item.year === targetYear
+      );
+      return { bills: billsOnDay, subscriptions: subsOnDay, debts: debtsOnDay, expenses: expensesOnDay, oneTime: oneTimeOnDay };
     };
 
     const goToPrevMonth = () => {
+      let newMonth = currentMonth;
+      let newYear = currentYear;
       if (currentMonth === 0) {
-        setCurrentMonth(11);
-        setCurrentYear(currentYear - 1);
+        newMonth = 11;
+        newYear = currentYear - 1;
       } else {
-        setCurrentMonth(currentMonth - 1);
+        newMonth = currentMonth - 1;
       }
-      setSelectedDay(null);
+      setCurrentMonth(newMonth);
+      setCurrentYear(newYear);
+      // Auto-select today if navigating to current month
+      if (newMonth === today.getMonth() && newYear === today.getFullYear()) {
+        setSelectedDay(today.getDate());
+      } else {
+        setSelectedDay(null);
+      }
     };
 
     const goToNextMonth = () => {
+      let newMonth = currentMonth;
+      let newYear = currentYear;
       if (currentMonth === 11) {
-        setCurrentMonth(0);
-        setCurrentYear(currentYear + 1);
+        newMonth = 0;
+        newYear = currentYear + 1;
       } else {
-        setCurrentMonth(currentMonth + 1);
+        newMonth = currentMonth + 1;
       }
-      setSelectedDay(null);
+      setCurrentMonth(newMonth);
+      setCurrentYear(newYear);
+      // Auto-select today if navigating to current month
+      if (newMonth === today.getMonth() && newYear === today.getFullYear()) {
+        setSelectedDay(today.getDate());
+      } else {
+        setSelectedDay(null);
+      }
     };
 
     const goToPrevWeek = () => {
@@ -1198,7 +1440,7 @@ const FinanceHub: React.FC = () => {
                 }
 
                 const items = getItemsForDay(day);
-                const hasItems = items.bills.length > 0 || items.subscriptions.length > 0 || items.debts.length > 0;
+                const hasItems = items.bills.length > 0 || items.subscriptions.length > 0 || items.debts.length > 0 || items.expenses.length > 0 || items.oneTime.length > 0;
                 const isToday = day === new Date().getDate() && currentMonth === new Date().getMonth() && currentYear === new Date().getFullYear();
                 const isSelected = day === selectedDay;
 
@@ -1231,6 +1473,12 @@ const FinanceHub: React.FC = () => {
                           {items.debts.length > 0 && (
                             <div className="size-1.5 rounded-full bg-red-500"></div>
                           )}
+                          {items.expenses.length > 0 && (
+                            <div className="size-1.5 rounded-full bg-blue-500"></div>
+                          )}
+                          {items.oneTime.length > 0 && (
+                            <div className="size-1.5 rounded-full bg-teal-500"></div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1253,6 +1501,14 @@ const FinanceHub: React.FC = () => {
                 <div className="size-3 rounded-full bg-red-500"></div>
                 <span className="text-xs font-medium text-text-muted">Debt Payments</span>
               </div>
+              <div className="flex items-center gap-2">
+                <div className="size-3 rounded-full bg-blue-500"></div>
+                <span className="text-xs font-medium text-text-muted">Recurring Expenses</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="size-3 rounded-full bg-teal-500"></div>
+                <span className="text-xs font-medium text-text-muted">One-Time Items</span>
+              </div>
             </div>
               </>
             ) : (
@@ -1263,8 +1519,8 @@ const FinanceHub: React.FC = () => {
                     const day = date.getDate();
                     const month = date.getMonth();
                     const year = date.getFullYear();
-                    const items = getItemsForDay(day);
-                    const hasItems = items.bills.length > 0 || items.subscriptions.length > 0 || items.debts.length > 0;
+                    const items = getItemsForDay(day, month, year);
+                    const hasItems = items.bills.length > 0 || items.subscriptions.length > 0 || items.debts.length > 0 || items.expenses.length > 0 || items.oneTime.length > 0;
                     const isToday = day === new Date().getDate() && month === new Date().getMonth() && year === new Date().getFullYear();
                     const isSelected = day === selectedDay;
 
@@ -1292,7 +1548,7 @@ const FinanceHub: React.FC = () => {
                             </p>
                           </div>
                           {hasItems && (
-                            <div className="flex gap-2">
+                            <div className="flex flex-wrap gap-2">
                               {items.bills.length > 0 && (
                                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-orange-100 dark:bg-orange-950/30">
                                   <div className="size-2 rounded-full bg-orange-500"></div>
@@ -1309,6 +1565,18 @@ const FinanceHub: React.FC = () => {
                                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-100 dark:bg-red-950/30">
                                   <div className="size-2 rounded-full bg-red-500"></div>
                                   <span className="text-xs font-bold text-red-700 dark:text-red-400">{items.debts.length} Debt{items.debts.length > 1 ? 's' : ''}</span>
+                                </div>
+                              )}
+                              {items.expenses.length > 0 && (
+                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-100 dark:bg-blue-950/30">
+                                  <div className="size-2 rounded-full bg-blue-500"></div>
+                                  <span className="text-xs font-bold text-blue-700 dark:text-blue-400">{items.expenses.length} Expense{items.expenses.length > 1 ? 's' : ''}</span>
+                                </div>
+                              )}
+                              {items.oneTime.length > 0 && (
+                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-teal-100 dark:bg-teal-950/30">
+                                  <div className="size-2 rounded-full bg-teal-500"></div>
+                                  <span className="text-xs font-bold text-teal-700 dark:text-teal-400">{items.oneTime.length} One-Time</span>
                                 </div>
                               )}
                             </div>
@@ -1336,6 +1604,20 @@ const FinanceHub: React.FC = () => {
                                 <span className="text-sm font-black text-red-600">${debt.minimumPayment.toLocaleString()}</span>
                               </div>
                             ))}
+                            {items.expenses.map(expense => (
+                              <div key={expense.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white dark:bg-surface-dark">
+                                <span className="text-sm font-bold text-text-main dark:text-white">{expense.emoji || '💸'} {expense.name}</span>
+                                <span className="text-sm font-black text-blue-600">${expense.amount.toLocaleString()}</span>
+                              </div>
+                            ))}
+                            {items.oneTime.map(item => (
+                              <div key={item.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-white dark:bg-surface-dark">
+                                <span className="text-sm font-bold text-text-main dark:text-white">{item.emoji || '📌'} {item.name}</span>
+                                <span className={`text-sm font-black ${item.type === 'income' || item.type === 'savings' ? 'text-green-600' : 'text-teal-600'}`}>
+                                  {item.type === 'income' || item.type === 'savings' ? '+' : '-'}${item.amount.toLocaleString()}
+                                </span>
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>
@@ -1349,7 +1631,11 @@ const FinanceHub: React.FC = () => {
           {/* Details Panel */}
           <div className="bg-white dark:bg-surface-dark rounded-2xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
             <h3 className="text-lg font-bold mb-4">
-              {selectedDay ? `${months[currentMonth]} ${selectedDay}` : 'Select a Day'}
+              {selectedDay
+                ? (selectedDay === today.getDate() && currentMonth === today.getMonth() && currentYear === today.getFullYear()
+                    ? `Today, ${months[currentMonth]} ${selectedDay}`
+                    : `${months[currentMonth]} ${selectedDay}`)
+                : 'Select a Day'}
             </h3>
 
             {selectedDay && selectedDayItems ? (
@@ -1408,8 +1694,46 @@ const FinanceHub: React.FC = () => {
                   </div>
                 )}
 
+                {/* Recurring Expenses */}
+                {selectedDayItems.expenses.length > 0 && (
+                  <div>
+                    <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">Recurring Expenses</p>
+                    <div className="space-y-2">
+                      {selectedDayItems.expenses.map(expense => (
+                        <div key={expense.id} className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/30">
+                          <div className="flex justify-between items-start mb-1">
+                            <p className="text-sm font-bold text-text-main dark:text-white">{expense.emoji || '💸'} {expense.name}</p>
+                            <span className="text-sm font-black text-blue-600 dark:text-blue-400">${expense.amount}</span>
+                          </div>
+                          <p className="text-xs text-text-muted capitalize">{expense.frequency}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* One-Time Items */}
+                {selectedDayItems.oneTime.length > 0 && (
+                  <div>
+                    <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">One-Time Items</p>
+                    <div className="space-y-2">
+                      {selectedDayItems.oneTime.map(item => (
+                        <div key={item.id} className="p-3 rounded-xl bg-teal-50 dark:bg-teal-950/20 border border-teal-200 dark:border-teal-900/30">
+                          <div className="flex justify-between items-start mb-1">
+                            <p className="text-sm font-bold text-text-main dark:text-white">{item.emoji || '📌'} {item.name}</p>
+                            <span className={`text-sm font-black ${item.type === 'income' || item.type === 'savings' ? 'text-green-600 dark:text-green-400' : 'text-teal-600 dark:text-teal-400'}`}>
+                              {item.type === 'income' || item.type === 'savings' ? '+' : '-'}${item.amount}
+                            </span>
+                          </div>
+                          <p className="text-xs text-text-muted capitalize">{item.type}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Total for the day */}
-                {(selectedDayItems.bills.length > 0 || selectedDayItems.subscriptions.length > 0 || selectedDayItems.debts.length > 0) && (
+                {(selectedDayItems.bills.length > 0 || selectedDayItems.subscriptions.length > 0 || selectedDayItems.debts.length > 0 || selectedDayItems.expenses.length > 0 || selectedDayItems.oneTime.length > 0) && (
                   <div className="pt-4 border-t border-gray-100 dark:border-gray-800">
                     <div className="flex justify-between items-center">
                       <span className="text-sm font-bold text-text-muted">Total Due</span>
@@ -1417,7 +1741,9 @@ const FinanceHub: React.FC = () => {
                         ${(
                           selectedDayItems.bills.reduce((sum, b) => sum + b.amount, 0) +
                           selectedDayItems.subscriptions.reduce((sum, s) => sum + s.amount, 0) +
-                          selectedDayItems.debts.reduce((sum, d) => sum + d.minimumPayment, 0)
+                          selectedDayItems.debts.reduce((sum, d) => sum + d.minimumPayment, 0) +
+                          selectedDayItems.expenses.reduce((sum, e) => sum + e.amount, 0) +
+                          selectedDayItems.oneTime.filter(i => i.type !== 'income' && i.type !== 'savings').reduce((sum, i) => sum + i.amount, 0)
                         ).toLocaleString()}
                       </span>
                     </div>
@@ -1442,6 +1768,17 @@ const FinanceHub: React.FC = () => {
       targetAmount: 0,
       currentAmount: 0,
       deadline: ''
+    });
+
+    // Expanded goal view state
+    const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
+
+    // Log contribution state
+    const [showLogModal, setShowLogModal] = useState(false);
+    const [logForm, setLogForm] = useState({
+      amount: 0,
+      date: new Date().toISOString().split('T')[0],
+      note: ''
     });
 
     const handleAddSavingsGoal = () => {
@@ -1473,6 +1810,12 @@ const FinanceHub: React.FC = () => {
           if (!user) return;
           try {
             await deleteDoc(doc(db, 'finance_savings', id));
+            // Also delete associated logs
+            const logsToDelete = savingsLogs.filter(log => log.savingsGoalId === id);
+            for (const log of logsToDelete) {
+              await deleteDoc(doc(db, 'finance_savings_logs', log.id));
+            }
+            setExpandedGoalId(null);
           } catch (error) {
             console.error('Error deleting savings goal:', error);
             alert('Failed to delete savings goal');
@@ -1512,24 +1855,462 @@ const FinanceHub: React.FC = () => {
       }
     };
 
+    // Log a contribution
+    const handleLogContribution = async () => {
+      if (!user || !expandedGoalId || logForm.amount <= 0) return;
+
+      const goal = savingsGoals.find(g => g.id === expandedGoalId);
+      if (!goal) return;
+
+      try {
+        const logId = `sl${Date.now()}`;
+        const newAmount = goal.currentAmount + logForm.amount;
+
+        // Create log entry
+        await setDoc(doc(db, 'finance_savings_logs', logId), {
+          id: logId,
+          savingsGoalId: expandedGoalId,
+          amount: logForm.amount,
+          date: logForm.date,
+          note: logForm.note,
+          runningTotal: newAmount,
+          userId: user.uid,
+          createdAt: new Date().toISOString()
+        });
+
+        // Update the savings goal's current amount
+        await setDoc(doc(db, 'finance_savings', expandedGoalId), {
+          ...goal,
+          currentAmount: newAmount,
+          userId: user.uid,
+          updatedAt: new Date().toISOString()
+        });
+
+        setShowLogModal(false);
+        setLogForm({ amount: 0, date: new Date().toISOString().split('T')[0], note: '' });
+      } catch (error) {
+        console.error('Error logging contribution:', error);
+        alert('Failed to log contribution');
+      }
+    };
+
+    // Delete a log entry
+    const handleDeleteLog = async (log: SavingsLog) => {
+      if (!user) return;
+
+      const goal = savingsGoals.find(g => g.id === log.savingsGoalId);
+      if (!goal) return;
+
+      confirmDelete(
+        'Are you sure you want to delete this contribution?',
+        async () => {
+          try {
+            // Delete the log
+            await deleteDoc(doc(db, 'finance_savings_logs', log.id));
+
+            // Update the savings goal's current amount
+            const newAmount = Math.max(0, goal.currentAmount - log.amount);
+            await setDoc(doc(db, 'finance_savings', goal.id), {
+              ...goal,
+              currentAmount: newAmount,
+              userId: user.uid,
+              updatedAt: new Date().toISOString()
+            });
+          } catch (error) {
+            console.error('Error deleting log:', error);
+            alert('Failed to delete contribution');
+          }
+        }
+      );
+    };
+
     // Calculate total savings
     const totalSaved = savingsGoals.reduce((sum, goal) => sum + goal.currentAmount, 0);
     const totalTarget = savingsGoals.reduce((sum, goal) => sum + goal.targetAmount, 0);
     const totalRemaining = totalTarget - totalSaved;
-    const overallProgress = (totalSaved / totalTarget) * 100;
+    const overallProgress = totalTarget > 0 ? (totalSaved / totalTarget) * 100 : 0;
 
     // Helper function to determine if goal is on track
     const getGoalStatus = (goal: SavingsGoal) => {
       const daysUntilDeadline = Math.ceil((new Date(goal.deadline).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
       const progress = (goal.currentAmount / goal.targetAmount) * 100;
 
-      if (progress >= 100) return { status: 'completed', color: 'emerald', text: 'Completed!' };
-      if (daysUntilDeadline < 0) return { status: 'overdue', color: 'red', text: 'Overdue' };
-      if (progress >= 75) return { status: 'on-track', color: 'blue', text: 'On Track' };
-      if (progress >= 50) return { status: 'moderate', color: 'yellow', text: 'Making Progress' };
-      return { status: 'behind', color: 'orange', text: 'Needs Attention' };
+      if (progress >= 100) return { status: 'completed', color: 'emerald', text: 'Completed!', bgClass: 'bg-emerald-100 dark:bg-emerald-950/30', textClass: 'text-emerald-700 dark:text-emerald-400' };
+      if (daysUntilDeadline < 0) return { status: 'overdue', color: 'red', text: 'Overdue', bgClass: 'bg-red-100 dark:bg-red-950/30', textClass: 'text-red-700 dark:text-red-400' };
+      if (progress >= 75) return { status: 'on-track', color: 'blue', text: 'On Track', bgClass: 'bg-blue-100 dark:bg-blue-950/30', textClass: 'text-blue-700 dark:text-blue-400' };
+      if (progress >= 50) return { status: 'moderate', color: 'yellow', text: 'Making Progress', bgClass: 'bg-yellow-100 dark:bg-yellow-950/30', textClass: 'text-yellow-700 dark:text-yellow-400' };
+      return { status: 'behind', color: 'orange', text: 'Needs Attention', bgClass: 'bg-orange-100 dark:bg-orange-950/30', textClass: 'text-orange-700 dark:text-orange-400' };
     };
 
+    // Get logs for the expanded goal
+    const getGoalLogs = (goalId: string) => {
+      return savingsLogs.filter(log => log.savingsGoalId === goalId);
+    };
+
+    // If a goal is expanded, show the detail view
+    if (expandedGoalId) {
+      const goal = savingsGoals.find(g => g.id === expandedGoalId);
+      if (!goal) {
+        setExpandedGoalId(null);
+        return null;
+      }
+
+      const progress = (goal.currentAmount / goal.targetAmount) * 100;
+      const remaining = goal.targetAmount - goal.currentAmount;
+      const status = getGoalStatus(goal);
+      const daysUntilDeadline = Math.ceil((new Date(goal.deadline).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+      const goalLogs = getGoalLogs(goal.id);
+
+      return (
+        <div className="flex flex-col gap-6 animate-in fade-in duration-300">
+          {/* Back Button & Header */}
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setExpandedGoalId(null)}
+              className="size-10 rounded-xl bg-white dark:bg-surface-dark border border-gray-100 dark:border-gray-800 flex items-center justify-center text-text-muted hover:text-primary hover:border-primary/30 transition-all"
+            >
+              <span className="material-symbols-outlined">arrow_back</span>
+            </button>
+            <div className="flex-1">
+              <h1 className="text-2xl font-black tracking-tight text-text-main dark:text-white">{goal.name}</h1>
+              <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold ${status.bgClass} ${status.textClass}`}>
+                {status.text}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleEditSavingsGoal(goal)}
+                className="size-10 rounded-xl bg-blue-100 dark:bg-blue-950/30 hover:bg-blue-200 dark:hover:bg-blue-900/40 flex items-center justify-center transition-colors"
+              >
+                <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-[20px]">edit</span>
+              </button>
+              <button
+                onClick={() => handleDeleteSavingsGoal(goal.id)}
+                className="size-10 rounded-xl bg-red-100 dark:bg-red-950/30 hover:bg-red-200 dark:hover:bg-red-900/40 flex items-center justify-center transition-colors"
+              >
+                <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-[20px]">delete</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Progress Card */}
+          <div className="bg-white dark:bg-surface-dark rounded-2xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+              <div>
+                <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-1">Current</p>
+                <p className="text-2xl font-black text-blue-600 dark:text-blue-400">${goal.currentAmount.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-1">Target</p>
+                <p className="text-2xl font-black text-text-main dark:text-white">${goal.targetAmount.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-1">Remaining</p>
+                <p className="text-2xl font-black text-orange-600 dark:text-orange-400">${remaining.toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-1">Days Left</p>
+                <p className={`text-2xl font-black ${daysUntilDeadline < 30 ? 'text-red-600 dark:text-red-400' : 'text-text-main dark:text-white'}`}>
+                  {daysUntilDeadline > 0 ? daysUntilDeadline : 'Overdue'}
+                </p>
+              </div>
+            </div>
+
+            {/* Progress Bar */}
+            <div>
+              <div className="flex justify-between items-baseline mb-2">
+                <span className="text-sm font-medium text-text-muted">Progress</span>
+                <span className="text-lg font-black text-primary">{progress.toFixed(1)}%</span>
+              </div>
+              <div className="w-full h-4 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full transition-all"
+                  style={{ width: `${Math.min(progress, 100)}%` }}
+                ></div>
+              </div>
+              <div className="flex justify-between mt-2">
+                <span className="text-xs text-text-muted">Deadline: {new Date(goal.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                {daysUntilDeadline > 0 && remaining > 0 && (
+                  <span className="text-xs font-bold text-primary">
+                    ${Math.ceil(remaining / Math.max(1, Math.ceil(daysUntilDeadline / 30))).toLocaleString()}/month needed
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Contribution Log Section */}
+          <div className="bg-white dark:bg-surface-dark rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
+              <div>
+                <h2 className="text-lg font-bold text-text-main dark:text-white">Contribution Log</h2>
+                <p className="text-sm text-text-muted">{goalLogs.length} contribution{goalLogs.length !== 1 ? 's' : ''} recorded</p>
+              </div>
+              <button
+                onClick={() => setShowLogModal(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white rounded-xl font-bold shadow-lg shadow-emerald-500/20 transition-all"
+              >
+                <span className="material-symbols-outlined text-[20px]">add</span>
+                Log Contribution
+              </button>
+            </div>
+
+            {goalLogs.length === 0 ? (
+              <div className="p-12 text-center">
+                <div className="size-16 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mx-auto mb-4">
+                  <span className="material-symbols-outlined text-3xl text-text-muted">savings</span>
+                </div>
+                <p className="text-text-muted font-medium">No contributions logged yet</p>
+                <p className="text-sm text-text-muted mt-1">Click "Log Contribution" to record your first savings!</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                {goalLogs.map((log, index) => (
+                  <div key={log.id} className="p-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                    <div className="flex items-center gap-4">
+                      <div className="size-10 rounded-xl bg-emerald-100 dark:bg-emerald-950/30 flex items-center justify-center shrink-0">
+                        <span className="material-symbols-outlined text-emerald-600 dark:text-emerald-400 text-[20px]">add_circle</span>
+                      </div>
+                      <div>
+                        <p className="font-bold text-text-main dark:text-white">+${log.amount.toLocaleString()}</p>
+                        <p className="text-xs text-text-muted">
+                          {new Date(log.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          {log.note && ` - ${log.note}`}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <p className="text-xs text-text-muted">Running Total</p>
+                        <p className="font-bold text-blue-600 dark:text-blue-400">${log.runningTotal.toLocaleString()}</p>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteLog(log); }}
+                        className="size-8 rounded-lg bg-red-100 dark:bg-red-950/30 hover:bg-red-200 dark:hover:bg-red-900/40 flex items-center justify-center transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-[16px]">delete</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Log Contribution Modal */}
+          {showLogModal && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-white dark:bg-surface-dark rounded-3xl shadow-2xl max-w-md w-full">
+                <div className="p-6 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xl font-black text-text-main dark:text-white">Log Contribution</h2>
+                    <button
+                      onClick={() => setShowLogModal(false)}
+                      className="size-9 rounded-xl bg-background-light dark:bg-background-dark hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center transition-all"
+                    >
+                      <span className="material-symbols-outlined text-[20px] text-text-muted">close</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-6 space-y-5">
+                  <div>
+                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Amount</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted font-bold">$</span>
+                      <input
+                        type="number"
+                        value={logForm.amount || ''}
+                        onChange={(e) => setLogForm({ ...logForm, amount: parseFloat(e.target.value) || 0 })}
+                        placeholder="500"
+                        className="w-full pl-8 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-background-dark text-text-main dark:text-white placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Date</label>
+                    <input
+                      type="date"
+                      value={logForm.date}
+                      onChange={(e) => setLogForm({ ...logForm, date: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-background-dark text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">Note (optional)</label>
+                    <input
+                      type="text"
+                      value={logForm.note}
+                      onChange={(e) => setLogForm({ ...logForm, note: e.target.value })}
+                      placeholder="e.g., Monthly deposit, Tax refund"
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-background-dark text-text-main dark:text-white placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+                    />
+                  </div>
+
+                  {/* Preview */}
+                  {logForm.amount > 0 && (
+                    <div className="bg-emerald-50 dark:bg-emerald-950/20 rounded-xl p-4 border border-emerald-200 dark:border-emerald-900/30">
+                      <p className="text-sm text-text-muted mb-1">After this contribution:</p>
+                      <p className="text-xl font-black text-emerald-600 dark:text-emerald-400">
+                        ${(goal.currentAmount + logForm.amount).toLocaleString()}
+                        <span className="text-sm font-medium text-text-muted ml-2">
+                          ({((goal.currentAmount + logForm.amount) / goal.targetAmount * 100).toFixed(1)}% of goal)
+                        </span>
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-6 border-t border-gray-100 dark:border-gray-800 flex gap-3">
+                  <button
+                    onClick={() => setShowLogModal(false)}
+                    className="flex-1 px-4 py-3 bg-background-light dark:bg-background-dark text-text-main dark:text-white rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleLogContribution}
+                    disabled={logForm.amount <= 0}
+                    className="flex-1 px-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white rounded-xl font-bold hover:from-emerald-600 hover:to-teal-600 transition-all shadow-lg shadow-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Log Contribution
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Savings Goal Modal (Edit) */}
+          {showSavingsModal && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-white dark:bg-surface-dark rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                <div className="p-6 border-b border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xl font-black text-text-main dark:text-white">
+                      {editingSavingsGoal ? 'Edit Savings Goal' : 'Add New Savings Goal'}
+                    </h2>
+                    <button
+                      onClick={() => setShowSavingsModal(false)}
+                      className="size-9 rounded-xl bg-background-light dark:bg-background-dark hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center transition-all"
+                    >
+                      <span className="material-symbols-outlined text-[20px] text-text-muted">close</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-6 space-y-5">
+                  <div>
+                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">
+                      Goal Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={savingsForm.name}
+                      onChange={(e) => setSavingsForm({ ...savingsForm, name: e.target.value })}
+                      placeholder="e.g., Emergency Fund, Vacation, New Car"
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-background-dark text-text-main dark:text-white placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-bold text-text-main dark:text-white mb-2">
+                        Target Amount <span className="text-red-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted font-bold">$</span>
+                        <input
+                          type="number"
+                          value={savingsForm.targetAmount || ''}
+                          onChange={(e) => setSavingsForm({ ...savingsForm, targetAmount: parseFloat(e.target.value) || 0 })}
+                          placeholder="10000"
+                          className="w-full pl-8 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-background-dark text-text-main dark:text-white placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+                        />
+                      </div>
+                      <p className="text-xs text-text-muted mt-1.5">Your savings goal</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-bold text-text-main dark:text-white mb-2">
+                        Current Amount
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted font-bold">$</span>
+                        <input
+                          type="number"
+                          value={savingsForm.currentAmount || ''}
+                          onChange={(e) => setSavingsForm({ ...savingsForm, currentAmount: parseFloat(e.target.value) || 0 })}
+                          placeholder="2500"
+                          className="w-full pl-8 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-background-dark text-text-main dark:text-white placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+                        />
+                      </div>
+                      <p className="text-xs text-text-muted mt-1.5">Amount already saved</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-text-main dark:text-white mb-2">
+                      Target Date <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={savingsForm.deadline}
+                      onChange={(e) => setSavingsForm({ ...savingsForm, deadline: e.target.value })}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-background-dark text-text-main dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+                    />
+                    <p className="text-xs text-text-muted mt-1.5">When do you want to reach this goal?</p>
+                  </div>
+
+                  {savingsForm.targetAmount > 0 && savingsForm.deadline && (
+                    <div className="bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-950/20 dark:to-cyan-950/20 rounded-xl p-4 border border-blue-200 dark:border-blue-900/30">
+                      <div className="flex items-start gap-3">
+                        <div className="size-10 rounded-xl bg-blue-100 dark:bg-blue-950/50 flex items-center justify-center shrink-0">
+                          <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-[20px]">calculate</span>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-bold text-text-main dark:text-white mb-2">Monthly Savings Needed</p>
+                          {(() => {
+                            const daysUntilDeadline = Math.ceil((new Date(savingsForm.deadline).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+                            const monthsUntilDeadline = Math.max(1, Math.ceil(daysUntilDeadline / 30));
+                            const remaining = savingsForm.targetAmount - savingsForm.currentAmount;
+                            const monthlyNeeded = Math.ceil(remaining / monthsUntilDeadline);
+                            return (
+                              <p className="text-2xl font-black text-primary">
+                                ${monthlyNeeded.toLocaleString()}<span className="text-sm font-medium text-text-muted">/month</span>
+                              </p>
+                            );
+                          })()}
+                          <p className="text-xs text-text-muted mt-1">Based on your target date and current savings</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-6 border-t border-gray-100 dark:border-gray-800 flex gap-3">
+                  <button
+                    onClick={() => setShowSavingsModal(false)}
+                    className="flex-1 px-4 py-3 bg-background-light dark:bg-background-dark text-text-main dark:text-white rounded-xl font-bold hover:bg-gray-200 dark:hover:bg-gray-700 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveSavingsGoal}
+                    className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl font-bold hover:from-blue-600 hover:to-cyan-600 transition-all shadow-lg shadow-blue-500/30"
+                  >
+                    {editingSavingsGoal ? 'Update Goal' : 'Add Goal'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Main savings list view (compact cards)
     return (
       <div className="flex flex-col gap-6 animate-in fade-in duration-700">
         {/* Header */}
@@ -1567,96 +2348,75 @@ const FinanceHub: React.FC = () => {
           </div>
         </div>
 
-        {/* Savings Goals Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {savingsGoals.map(goal => {
-            const progress = (goal.currentAmount / goal.targetAmount) * 100;
-            const remaining = goal.targetAmount - goal.currentAmount;
-            const status = getGoalStatus(goal);
-            const daysUntilDeadline = Math.ceil((new Date(goal.deadline).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-
-            return (
-              <div key={goal.id} className="bg-white dark:bg-surface-dark rounded-2xl p-6 border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-md transition-all">
-                {/* Header */}
-                <div className="flex justify-between items-start mb-4">
-                  <div className="flex-1">
-                    <h3 className="text-lg font-bold text-text-main dark:text-white mb-1">{goal.name}</h3>
-                    <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold bg-${status.color}-100 dark:bg-${status.color}-950/30 text-${status.color}-700 dark:text-${status.color}-400`}>
-                      {status.text}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleEditSavingsGoal(goal)}
-                      className="size-10 rounded-xl bg-blue-100 dark:bg-blue-950/30 hover:bg-blue-200 dark:hover:bg-blue-900/40 flex items-center justify-center transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-[20px]">edit</span>
-                    </button>
-                    <button
-                      onClick={() => handleDeleteSavingsGoal(goal.id)}
-                      className="size-10 rounded-xl bg-red-100 dark:bg-red-950/30 hover:bg-red-200 dark:hover:bg-red-900/40 flex items-center justify-center transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-[20px]">delete</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Progress */}
-                <div className="mb-4">
-                  <div className="flex justify-between items-baseline mb-2">
-                    <span className="text-xs font-medium text-text-muted">Progress</span>
-                    <span className="text-sm font-black text-primary">{progress.toFixed(1)}%</span>
-                  </div>
-                  <div className="w-full h-3 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full transition-all`}
-                      style={{ width: `${Math.min(progress, 100)}%` }}
-                    ></div>
-                  </div>
-                </div>
-
-                {/* Amounts */}
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div className="bg-background-light dark:bg-background-dark rounded-xl p-3">
-                    <p className="text-xs font-medium text-text-muted mb-1">Current</p>
-                    <p className="text-lg font-black text-blue-600 dark:text-blue-400">${goal.currentAmount.toLocaleString()}</p>
-                  </div>
-                  <div className="bg-background-light dark:bg-background-dark rounded-xl p-3">
-                    <p className="text-xs font-medium text-text-muted mb-1">Target</p>
-                    <p className="text-lg font-black text-text-main dark:text-white">${goal.targetAmount.toLocaleString()}</p>
-                  </div>
-                </div>
-
-                {/* Details */}
-                <div className="space-y-2 pt-4 border-t border-gray-100 dark:border-gray-800">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-medium text-text-muted">Remaining</span>
-                    <span className="text-sm font-bold text-orange-600 dark:text-orange-400">${remaining.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-medium text-text-muted">Deadline</span>
-                    <span className="text-sm font-bold text-text-main dark:text-white">
-                      {new Date(goal.deadline).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-medium text-text-muted">Days Left</span>
-                    <span className={`text-sm font-bold ${daysUntilDeadline < 30 ? 'text-red-600 dark:text-red-400' : 'text-text-main dark:text-white'}`}>
-                      {daysUntilDeadline > 0 ? `${daysUntilDeadline} days` : 'Overdue'}
-                    </span>
-                  </div>
-                  {daysUntilDeadline > 0 && remaining > 0 && (
-                    <div className="flex justify-between items-center pt-2 border-t border-gray-100 dark:border-gray-800">
-                      <span className="text-xs font-medium text-text-muted">Needed per month</span>
-                      <span className="text-sm font-bold text-primary">
-                        ${Math.ceil(remaining / (daysUntilDeadline / 30)).toLocaleString()}
-                      </span>
-                    </div>
-                  )}
-                </div>
+        {/* Compact Savings Goals List */}
+        <div className="space-y-3">
+          {savingsGoals.length === 0 ? (
+            <div className="bg-white dark:bg-surface-dark rounded-2xl p-12 border border-gray-100 dark:border-gray-800 text-center">
+              <div className="size-16 rounded-2xl bg-blue-100 dark:bg-blue-950/30 flex items-center justify-center mx-auto mb-4">
+                <span className="material-symbols-outlined text-3xl text-blue-600 dark:text-blue-400">savings</span>
               </div>
-            );
-          })}
+              <p className="text-lg font-bold text-text-main dark:text-white mb-1">No savings goals yet</p>
+              <p className="text-sm text-text-muted mb-4">Start saving by creating your first goal!</p>
+              <button
+                onClick={handleAddSavingsGoal}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-bold transition-all"
+              >
+                <span className="material-symbols-outlined">add</span>
+                Add Your First Goal
+              </button>
+            </div>
+          ) : (
+            savingsGoals.map(goal => {
+              const progress = (goal.currentAmount / goal.targetAmount) * 100;
+              const status = getGoalStatus(goal);
+
+              return (
+                <div
+                  key={goal.id}
+                  onClick={() => setExpandedGoalId(goal.id)}
+                  className="bg-white dark:bg-surface-dark rounded-2xl p-5 border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-md hover:border-primary/30 transition-all cursor-pointer group"
+                >
+                  <div className="flex items-center gap-4">
+                    {/* Icon */}
+                    <div className="size-12 rounded-xl bg-blue-100 dark:bg-blue-950/30 flex items-center justify-center shrink-0">
+                      <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-[24px]">savings</span>
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="font-bold text-text-main dark:text-white truncate">{goal.name}</h3>
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold ${status.bgClass} ${status.textClass} shrink-0 ml-2`}>
+                          {status.text}
+                        </span>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full transition-all"
+                            style={{ width: `${Math.min(progress, 100)}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-sm font-black text-primary shrink-0">{progress.toFixed(0)}%</span>
+                      </div>
+
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-xs text-text-muted">
+                          ${goal.currentAmount.toLocaleString()} of ${goal.targetAmount.toLocaleString()}
+                        </span>
+                        <span className="text-xs text-text-muted group-hover:text-primary transition-colors flex items-center gap-1">
+                          View details
+                          <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
 
 

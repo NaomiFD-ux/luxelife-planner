@@ -88,7 +88,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   // Calculate unread count
   const unreadCount = notifications.filter(n => !n.read && !n.dismissed).length;
 
-  // Subscribe to notifications collection
+  // Subscribe to notifications collection (top-level collection with userId field)
   useEffect(() => {
     if (!user) {
       setNotifications([]);
@@ -96,9 +96,10 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       return;
     }
 
-    const notificationsRef = collection(db, 'users', user.uid, 'notifications');
+    const notificationsRef = collection(db, 'notifications');
     const q = query(
       notificationsRef,
+      where('userId', '==', user.uid),
       where('dismissed', '==', false),
       orderBy('createdAt', 'desc')
     );
@@ -136,39 +137,56 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   const addNotification = useCallback(async (
     notification: Omit<AppNotification, 'id' | 'createdAt' | 'read' | 'dismissed'>
   ) => {
-    if (!user) return;
+    console.log('[addNotification] Called with:', notification.type, notification.title);
 
-    const notificationsRef = collection(db, 'users', user.uid, 'notifications');
+    if (!user) {
+      console.log('[addNotification] No user, returning');
+      return;
+    }
 
-    // Check if similar notification already exists (same type and relatedId)
+    const notificationsRef = collection(db, 'notifications');
+
+    // Check if similar notification already exists (same type, relatedId, and userId)
     if (notification.relatedId) {
-      const existingQuery = query(
-        notificationsRef,
-        where('type', '==', notification.type),
-        where('relatedId', '==', notification.relatedId),
-        where('dismissed', '==', false)
-      );
-      const existing = await getDocs(existingQuery);
-      if (!existing.empty) {
-        return; // Don't create duplicate notification
+      try {
+        const existingQuery = query(
+          notificationsRef,
+          where('userId', '==', user.uid),
+          where('type', '==', notification.type),
+          where('relatedId', '==', notification.relatedId)
+        );
+        const existing = await getDocs(existingQuery);
+        console.log('[addNotification] Duplicate check - found', existing.size, 'existing');
+        if (!existing.empty) {
+          console.log('[addNotification] Skipping - duplicate exists');
+          return; // Don't create duplicate notification
+        }
+      } catch (error) {
+        console.error('[addNotification] Duplicate check failed:', error);
       }
     }
 
-    await addDoc(notificationsRef, {
-      ...notification,
-      icon: notification.icon || getNotificationIcon(notification.type),
-      read: false,
-      dismissed: false,
-      createdAt: Timestamp.now(),
-      expiresAt: notification.expiresAt ? Timestamp.fromDate(new Date(notification.expiresAt)) : null,
-    });
+    try {
+      const docRef = await addDoc(notificationsRef, {
+        ...notification,
+        userId: user.uid,
+        icon: notification.icon || getNotificationIcon(notification.type),
+        read: false,
+        dismissed: false,
+        createdAt: Timestamp.now(),
+        expiresAt: notification.expiresAt ? Timestamp.fromDate(new Date(notification.expiresAt)) : null,
+      });
+      console.log('[addNotification] Created notification:', docRef.id);
+    } catch (error) {
+      console.error('[addNotification] Failed to create notification:', error);
+    }
   }, [user]);
 
   // Mark single notification as read
   const markAsRead = useCallback(async (notificationId: string) => {
     if (!user) return;
 
-    const notificationRef = doc(db, 'users', user.uid, 'notifications', notificationId);
+    const notificationRef = doc(db, 'notifications', notificationId);
     await updateDoc(notificationRef, { read: true });
   }, [user]);
 
@@ -178,31 +196,37 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
 
     const batch = writeBatch(db);
     notifications.filter(n => !n.read).forEach(notification => {
-      const notificationRef = doc(db, 'users', user.uid, 'notifications', notification.id);
+      const notificationRef = doc(db, 'notifications', notification.id);
       batch.update(notificationRef, { read: true });
     });
     await batch.commit();
   }, [user, notifications]);
 
-  // Dismiss a notification
+  // Dismiss a notification - DELETE it from Firestore
   const dismissNotification = useCallback(async (notificationId: string) => {
     if (!user) return;
 
-    const notificationRef = doc(db, 'users', user.uid, 'notifications', notificationId);
-    await updateDoc(notificationRef, { dismissed: true });
+    const notificationRef = doc(db, 'notifications', notificationId);
+    await deleteDoc(notificationRef);
   }, [user]);
 
-  // Clear all notifications
+  // Clear all notifications - DELETE ALL from Firestore (including any old dismissed ones)
   const clearAllNotifications = useCallback(async () => {
-    if (!user || notifications.length === 0) return;
+    if (!user) return;
+
+    // Query ALL notifications for this user (not just non-dismissed) to ensure complete cleanup
+    const notificationsRef = collection(db, 'notifications');
+    const userNotificationsQuery = query(notificationsRef, where('userId', '==', user.uid));
+    const allNotificationsSnapshot = await getDocs(userNotificationsQuery);
+
+    if (allNotificationsSnapshot.empty) return;
 
     const batch = writeBatch(db);
-    notifications.forEach(notification => {
-      const notificationRef = doc(db, 'users', user.uid, 'notifications', notification.id);
-      batch.update(notificationRef, { dismissed: true });
+    allNotificationsSnapshot.forEach(docSnapshot => {
+      batch.delete(docSnapshot.ref);
     });
     await batch.commit();
-  }, [user, notifications]);
+  }, [user]);
 
   // Generate notifications for tasks due soon or overdue
   const generateTaskNotifications = useCallback(async (tasks: any[]) => {
@@ -248,24 +272,63 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
 
   // Generate notifications for bills due soon or overdue
   const generateBillNotifications = useCallback(async (bills: any[]) => {
-    if (!user) return;
+    console.log('[generateBillNotifications] Called with', bills.length, 'bills');
+    if (!user) {
+      console.log('[generateBillNotifications] No user, returning');
+      return;
+    }
 
     const now = new Date();
-    const threeDaysFromNow = new Date(now);
-    threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
+    const currentDay = now.getDate();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    console.log('[generateBillNotifications] Today is day', currentDay, 'of month', currentMonth + 1);
 
     for (const bill of bills) {
-      if (!bill.dueDate || bill.paid) continue;
+      console.log('[generateBillNotifications] Checking bill:', bill.name, 'dueDate:', bill.dueDate, 'paid:', bill.paid);
 
-      const dueDate = new Date(bill.dueDate);
-      const isOverdue = dueDate < now && dueDate.toDateString() !== now.toDateString();
-      const isDueSoon = dueDate <= threeDaysFromNow && dueDate >= now;
+      if (!bill.dueDate || bill.paid) {
+        console.log('[generateBillNotifications] Skipping - no dueDate or paid');
+        continue;
+      }
+
+      // bill.dueDate is stored as day of month (1-31), not a timestamp
+      const dueDayOfMonth = typeof bill.dueDate === 'number' ? bill.dueDate : parseInt(bill.dueDate);
+
+      // Skip invalid due dates
+      if (isNaN(dueDayOfMonth) || dueDayOfMonth < 1 || dueDayOfMonth > 31) {
+        console.log('[generateBillNotifications] Skipping - invalid dueDate:', dueDayOfMonth);
+        continue;
+      }
+
+      // Construct the actual due date for this month
+      let dueDate = new Date(currentYear, currentMonth, dueDayOfMonth);
+
+      // If the due date this month has passed, check if it was recent (within last 7 days for overdue)
+      // Otherwise, the next due date would be next month
+      const daysDiff = currentDay - dueDayOfMonth;
+      const isOverdue = daysDiff > 0 && daysDiff <= 7; // Overdue if 1-7 days past due
+      const isDueSoon = dueDayOfMonth >= currentDay && dueDayOfMonth <= currentDay + 3; // Due within 3 days
+
+      console.log('[generateBillNotifications] Bill', bill.name, '- daysDiff:', daysDiff, 'isOverdue:', isOverdue, 'isDueSoon:', isDueSoon);
+
+      // Helper to format day with ordinal suffix
+      const getOrdinalSuffix = (day: number) => {
+        if (day > 3 && day < 21) return 'th';
+        switch (day % 10) {
+          case 1: return 'st';
+          case 2: return 'nd';
+          case 3: return 'rd';
+          default: return 'th';
+        }
+      };
 
       if (isOverdue) {
         await addNotification({
           type: NotificationType.BILL_OVERDUE,
           title: 'Bill Overdue',
-          message: `"${bill.name}" ($${bill.amount}) was due on ${dueDate.toLocaleDateString()}`,
+          message: `"${bill.name}" ($${bill.amount}) was due on the ${dueDayOfMonth}${getOrdinalSuffix(dueDayOfMonth)}`,
           priority: NotificationPriority.URGENT,
           hub: HubType.FINANCE,
           actionUrl: '/finance#calendar',
@@ -273,11 +336,12 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
           relatedId: bill.id,
         });
       } else if (isDueSoon) {
-        const daysUntil = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        const daysUntil = dueDayOfMonth - currentDay;
+        const dueMessage = daysUntil === 0 ? 'today' : `in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`;
         await addNotification({
           type: NotificationType.BILL_DUE_SOON,
           title: 'Bill Due Soon',
-          message: `"${bill.name}" ($${bill.amount}) is due in ${daysUntil} day${daysUntil !== 1 ? 's' : ''}`,
+          message: `"${bill.name}" ($${bill.amount}) is due ${dueMessage}`,
           priority: NotificationPriority.HIGH,
           hub: HubType.FINANCE,
           actionUrl: '/finance#calendar',

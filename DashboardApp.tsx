@@ -12,6 +12,7 @@ import { EventsProvider } from './contexts/EventsContext';
 import { GoogleCalendarProvider } from './contexts/GoogleCalendarContext';
 import { SyncSettingsProvider } from './contexts/SyncSettingsContext';
 import { NotificationProvider } from './contexts/NotificationContext';
+import { AppDataProvider } from './contexts/AppDataContext';
 import { useAuth } from './contexts/AuthContext';
 
 // Context for global state
@@ -175,20 +176,22 @@ const DashboardApp: React.FC = () => {
   };
 
   return (
-    <EventsProvider>
-      <SyncSettingsProvider>
-        <GoogleCalendarProvider>
-          <NotificationProvider>
-            <NotificationGenerator />
-            <DashboardAppContext.Provider value={{ activeHub, setActiveHub, user, setUser, isDark, setIsDark, enabledHubs, setEnabledHubs }}>
-              <MainLayout>
-                {renderHub()}
-              </MainLayout>
-            </DashboardAppContext.Provider>
-          </NotificationProvider>
-        </GoogleCalendarProvider>
-      </SyncSettingsProvider>
-    </EventsProvider>
+    <AppDataProvider>
+      <EventsProvider>
+        <SyncSettingsProvider>
+          <GoogleCalendarProvider>
+            <NotificationProvider>
+              <NotificationGenerator />
+              <DashboardAppContext.Provider value={{ activeHub, setActiveHub, user, setUser, isDark, setIsDark, enabledHubs, setEnabledHubs }}>
+                <MainLayout>
+                  {renderHub()}
+                </MainLayout>
+              </DashboardAppContext.Provider>
+            </NotificationProvider>
+          </GoogleCalendarProvider>
+        </SyncSettingsProvider>
+      </EventsProvider>
+    </AppDataProvider>
   );
 };
 

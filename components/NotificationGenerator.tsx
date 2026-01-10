@@ -68,7 +68,12 @@ const NotificationGenerator: React.FC = () => {
 
   // Listen to finance bills and generate notifications
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      console.log('[NotificationGenerator] No user, skipping bills');
+      return;
+    }
+
+    console.log('[NotificationGenerator] Subscribing to bills for user:', user.uid);
 
     const q = query(
       collection(db, 'finance_bills'),
@@ -81,7 +86,10 @@ const NotificationGenerator: React.FC = () => {
         ...doc.data()
       }));
 
+      console.log('[NotificationGenerator] Bills loaded:', bills.length, bills);
       await generateBillNotifications(bills);
+    }, (error) => {
+      console.error('[NotificationGenerator] Error loading bills:', error);
     });
 
     return () => unsubscribe();

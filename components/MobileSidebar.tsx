@@ -24,13 +24,26 @@ const MobileSidebar: React.FC = () => {
     }
   };
 
-  // Get active sub-view from hash (for Planner)
+  // Get active sub-view from pathname for all hubs
   const getActiveSubView = () => {
-    if (activeHub === HubType.PLANNER) {
-      const hash = location.hash.replace('#', '');
-      return hash || 'planner';
+    // Extract the sub-view from the path (e.g., /finance/overview -> overview)
+    const pathParts = location.pathname.split('/').filter(Boolean);
+    const subView = pathParts[1]; // Second part is the sub-view
+
+    if (!subView) {
+      // Return default view for each hub
+      switch (activeHub) {
+        case HubType.PLANNER: return 'planner';
+        case HubType.FINANCE: return 'dashboard';
+        case HubType.FITNESS: return 'overview';
+        case HubType.SCHOOL: return 'dashboard';
+        case HubType.JOBS: return 'dashboard';
+        case HubType.BIBLE: return 'dashboard';
+        case HubType.MEALS: return 'dashboard';
+        default: return 'home';
+      }
     }
-    return '';
+    return subView;
   };
 
   const activeSubView = getActiveSubView();
@@ -107,11 +120,22 @@ const MobileSidebar: React.FC = () => {
   };
 
   const handleSubNavClick = (id: string) => {
-    if (activeHub === HubType.PLANNER) {
-      navigate(`/planner#${id}`);
-    } else {
-      window.dispatchEvent(new CustomEvent('hubSubNavChange', { detail: { subView: id } }));
-    }
+    // Get the current path for the hub
+    const hubPaths: Record<HubType, string> = {
+      [HubType.DASHBOARD]: '/dashboard',
+      [HubType.FINANCE]: '/finance',
+      [HubType.CALENDAR]: '/calendar',
+      [HubType.FITNESS]: '/fitness',
+      [HubType.PLANNER]: '/planner',
+      [HubType.MEALS]: '/meals',
+      [HubType.VISION]: '/vision',
+      [HubType.BIBLE]: '/bible',
+      [HubType.JOBS]: '/jobs',
+      [HubType.SCHOOL]: '/school',
+    };
+
+    // Use path-based navigation for all hubs (e.g., /finance/overview)
+    navigate(`${hubPaths[activeHub]}/${id}`);
     setIsOpen(false);
   };
 
@@ -175,8 +199,7 @@ const MobileSidebar: React.FC = () => {
           <nav className="flex-1 overflow-y-auto p-3">
             <div className="space-y-1">
               {subNav.map((item) => {
-                const isActive = activeSubView === item.id ||
-                  (activeHub !== HubType.PLANNER && item.id === 'dashboard');
+                const isActive = activeSubView === item.id;
 
                 return (
                   <button

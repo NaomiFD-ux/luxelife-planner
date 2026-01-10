@@ -2,102 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../DashboardApp';
-import { HubType, Task, Habit, TaskStatus } from '../types';
+import { HubType, TaskStatus } from '../types';
 import { useEvents } from '../contexts/EventsContext';
-
-// School assignment interface
-interface AssignmentItem {
-  id: string;
-  classId: string;
-  title: string;
-  type: string;
-  dueDate: string;
-  status: string;
-}
-
-// Finance interfaces
-interface Income {
-  id: string;
-  source: string;
-  amount: number;
-  frequency: 'weekly' | 'bi-weekly' | 'monthly' | 'yearly';
-  payDay?: string;
-}
-
-interface Bill {
-  id: string;
-  name: string;
-  amount: number;
-  dueDate: number;
-  frequency: 'monthly' | 'yearly';
-  category: string;
-}
-
-interface Subscription {
-  id: string;
-  name: string;
-  amount: number;
-  dueDate: number;
-  frequency: 'monthly' | 'yearly';
-}
-
-interface Transaction {
-  id: string;
-  date: string;
-  description: string;
-  category: string;
-  amount: number;
-  type: 'income' | 'expense';
-}
-
-interface RecurringExpense {
-  id: string;
-  name: string;
-  amount: number;
-  dueDate: number;
-  frequency: 'monthly' | 'yearly';
-  emoji?: string;
-  category?: string;
-}
-
-interface SavingsGoal {
-  id: string;
-  name: string;
-  targetAmount: number;
-  currentAmount: number;
-  deadline: string;
-}
-
-// Job Tracker interface
-interface JobApplication {
-  id: string;
-  company: string;
-  role: string;
-  salary: string;
-  locationType: 'Remote' | 'Hybrid' | 'Onsite';
-  stage: string;
-  dateApplied: string;
-  logo: string;
-  description: string;
-}
-
-// Bible Study interfaces
-interface Highlight {
-  id: string;
-  verseRef: string;
-  text: string;
-  color: string;
-  dateAdded: string;
-  categories: string[];
-}
-
-interface Favorite {
-  id: string;
-  verseRef: string;
-  text: string;
-  dateAdded: string;
-  categories: string[];
-}
+import { useAppData } from '../contexts/AppDataContext';
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -105,132 +12,22 @@ const Dashboard: React.FC = () => {
   const { events } = useEvents();
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  // Load tasks from Planner Hub
-  const [tasks, setTasks] = useState<Task[]>(() => {
-    try {
-      const saved = localStorage.getItem('luxelife_planner_tasks');
-      return saved ? JSON.parse(saved) : [];
-    } catch (error) {
-      console.error('Failed to load tasks:', error);
-      return [];
-    }
-  });
-
-  // Load habits from Planner Hub
-  const [habits, setHabits] = useState<Habit[]>(() => {
-    try {
-      const saved = localStorage.getItem('luxelife_planner_habits');
-      return saved ? JSON.parse(saved) : [];
-    } catch (error) {
-      console.error('Failed to load habits:', error);
-      return [];
-    }
-  });
-
-  // Load assignments from School Hub
-  const [assignments, setAssignments] = useState<AssignmentItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('luxelife_school_assignments');
-      return saved ? JSON.parse(saved) : [];
-    } catch (error) {
-      console.error('Failed to load assignments:', error);
-      return [];
-    }
-  });
-
-  // Load finance data from Finance Hub
-  const [incomes, setIncomes] = useState<Income[]>(() => {
-    try {
-      const saved = localStorage.getItem('luxelife_finance_incomes');
-      return saved ? JSON.parse(saved) : [];
-    } catch (error) {
-      console.error('Failed to load incomes:', error);
-      return [];
-    }
-  });
-
-  const [bills, setBills] = useState<Bill[]>(() => {
-    try {
-      const saved = localStorage.getItem('luxelife_finance_bills');
-      return saved ? JSON.parse(saved) : [];
-    } catch (error) {
-      console.error('Failed to load bills:', error);
-      return [];
-    }
-  });
-
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>(() => {
-    try {
-      const saved = localStorage.getItem('luxelife_finance_subscriptions');
-      return saved ? JSON.parse(saved) : [];
-    } catch (error) {
-      console.error('Failed to load subscriptions:', error);
-      return [];
-    }
-  });
-
-  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>(() => {
-    try {
-      const saved = localStorage.getItem('luxelife_finance_recurring_expenses');
-      return saved ? JSON.parse(saved) : [];
-    } catch (error) {
-      console.error('Failed to load recurring expenses:', error);
-      return [];
-    }
-  });
-
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    try {
-      const saved = localStorage.getItem('luxelife_finance_transactions');
-      return saved ? JSON.parse(saved) : [];
-    } catch (error) {
-      console.error('Failed to load transactions:', error);
-      return [];
-    }
-  });
-
-  // Load job applications from Job Tracker
-  const [jobApplications, setJobApplications] = useState<JobApplication[]>(() => {
-    try {
-      const saved = localStorage.getItem('luxelife_job_applications');
-      return saved ? JSON.parse(saved) : [];
-    } catch (error) {
-      console.error('Failed to load job applications:', error);
-      return [];
-    }
-  });
-
-  // Load savings goals from Finance Hub
-  const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>(() => {
-    try {
-      const saved = localStorage.getItem('luxelife_finance_savings');
-      return saved ? JSON.parse(saved) : [];
-    } catch (error) {
-      console.error('Failed to load savings goals:', error);
-      return [];
-    }
-  });
-
-  // Load Bible Study data
-  const [highlights, setHighlights] = useState<Highlight[]>(() => {
-    try {
-      const saved = localStorage.getItem('luxelife_bible_highlights');
-      return saved ? JSON.parse(saved) : [];
-    } catch (error) {
-      console.error('Failed to load highlights:', error);
-      return [];
-    }
-  });
-
-  const [favorites, setFavorites] = useState<Favorite[]>(() => {
-    try {
-      const saved = localStorage.getItem('luxelife_bible_favorites');
-      return saved ? JSON.parse(saved) : [];
-    } catch (error) {
-      console.error('Failed to load favorites:', error);
-      return [];
-    }
-  });
+  // Get all data from centralized AppDataContext
+  const {
+    loading,
+    initialLoadComplete,
+    tasks,
+    habits,
+    assignments,
+    incomes,
+    bills,
+    subscriptions,
+    recurringExpenses,
+    savingsGoals,
+    jobApplications,
+    bibleHighlights: highlights,
+    bibleFavorites: favorites,
+  } = useAppData();
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000); // Update every minute
@@ -482,6 +279,16 @@ const Dashboard: React.FC = () => {
       return b.dueDate >= today && b.dueDate <= today + 7; // Bills due within next 7 days
     }).length,
   };
+
+  // Show loading state while data is being fetched
+  if (!initialLoadComplete) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent"></div>
+        <p className="text-text-muted font-medium">Loading your dashboard...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6">

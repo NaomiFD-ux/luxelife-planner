@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useEvents } from '../contexts/EventsContext';
 import { FastingSession, WeightEntry, FastingHistory, FastingGoal, HydrationEntry, ElectrolyteEntry, SymptomEntry, JournalEntry, ProgressPhoto } from '../types';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query, where } from 'firebase/firestore';
@@ -85,18 +86,19 @@ interface NutritionLog {
 const FitnessHub: React.FC = () => {
   const { addEvent, deleteEventsBySource, clearEventsBySourceType, events } = useEvents();
   const { user } = useAuth();
-  const [currentView, setCurrentView] = useState<FitnessSubView>('overview');
+  const location = useLocation();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const handleSubNav = (e: any) => {
-      if (e.detail && e.detail.subView) {
-        setCurrentView(e.detail.subView as FitnessSubView);
-      }
-    };
-    window.addEventListener('hubSubNavChange', handleSubNav);
-    return () => window.removeEventListener('hubSubNavChange', handleSubNav);
-  }, []);
+  // Get current view from URL path (e.g., /fitness/workouts -> workouts)
+  const getViewFromPath = (): FitnessSubView => {
+    const pathParts = location.pathname.split('/').filter(Boolean);
+    const subView = pathParts[1]; // Second part is the sub-view (e.g., "workouts")
+    const validViews: FitnessSubView[] = ['overview', 'workouts', 'nutrition', 'measurements', 'settings', 'fasting'];
+    return validViews.includes(subView as FitnessSubView) ? (subView as FitnessSubView) : 'overview';
+  };
+
+  const currentView = getViewFromPath();
 
   // ============== WORKOUTS STATE ==============
   const [workoutLocationTab, setWorkoutLocationTab] = useState<WorkoutLocation>('gym');
@@ -329,7 +331,11 @@ const FitnessHub: React.FC = () => {
           daysToAdd += (week * 7); // Add weeks
 
           eventDate.setDate(today.getDate() + daysToAdd);
-          const formattedDate = eventDate.toISOString().split('T')[0];
+          // Use local date formatting to avoid timezone shifts
+          const year = eventDate.getFullYear();
+          const month = (eventDate.getMonth() + 1).toString().padStart(2, '0');
+          const day = eventDate.getDate().toString().padStart(2, '0');
+          const formattedDate = `${year}-${month}-${day}`;
 
           // Calculate end time (default 1 hour duration)
           const [hours, minutes] = routine.time.split(':').map(Number);
@@ -736,7 +742,7 @@ const FitnessHub: React.FC = () => {
           </p>
 
           <button
-            onClick={() => setCurrentView('fasting')}
+            onClick={() => navigate('/fitness/fasting')}
             className="w-full py-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-xl font-bold shadow-lg shadow-blue-500/30 hover:shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
           >
             <span className="material-symbols-outlined">play_circle</span>
@@ -778,7 +784,7 @@ const FitnessHub: React.FC = () => {
             </div>
           </div>
           <button
-            onClick={() => setCurrentView('fasting')}
+            onClick={() => navigate('/fitness/fasting')}
             className="size-8 rounded-full bg-background-light dark:bg-background-dark hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center justify-center transition-all"
           >
             <span className="material-symbols-outlined text-[18px]">open_in_full</span>
@@ -874,7 +880,7 @@ const FitnessHub: React.FC = () => {
           </div>
           <div className="flex gap-3">
             <button
-              onClick={() => setCurrentView('workouts')}
+              onClick={() => navigate('/fitness/workouts')}
               className="bg-white dark:bg-surface-dark px-6 py-3 rounded-2xl font-bold shadow-sm border border-gray-100 dark:border-gray-800 flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
             >
               <span className="material-symbols-outlined text-[20px]">calendar_month</span>
@@ -882,7 +888,7 @@ const FitnessHub: React.FC = () => {
             </button>
             <button
               onClick={() => {
-                setCurrentView('workouts');
+                navigate('/fitness/workouts');
                 setIsRoutineModalOpen(true);
               }}
               className="bg-primary text-white px-6 py-3 rounded-2xl font-bold shadow-lg shadow-primary/20 flex items-center gap-2 hover:scale-[1.02] active:scale-95 transition-all"
@@ -917,7 +923,7 @@ const FitnessHub: React.FC = () => {
             <div className="flex items-center justify-between mb-8">
               <h3 className="text-xl font-bold">Featured Workouts</h3>
               <button
-                onClick={() => setCurrentView('workouts')}
+                onClick={() => navigate('/fitness/workouts')}
                 className="text-primary text-sm font-bold hover:underline"
               >
                 Browse Library
@@ -965,7 +971,7 @@ const FitnessHub: React.FC = () => {
               </div>
             </div>
             <button
-              onClick={() => setCurrentView('workouts')}
+              onClick={() => navigate('/fitness/workouts')}
               className="w-full mt-8 py-4 bg-text-main dark:bg-white text-white dark:text-gray-900 rounded-2xl font-bold text-sm hover:scale-[1.02] active:scale-95 transition-all"
             >
               View Schedule
@@ -1769,7 +1775,7 @@ const FitnessHub: React.FC = () => {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => setCurrentView('settings')}
+              onClick={() => navigate('/fitness/settings')}
               className="bg-white dark:bg-surface-dark px-4 py-2 rounded-xl text-sm font-bold shadow-sm border border-gray-100 dark:border-gray-800 flex items-center gap-1.5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all text-text-main dark:text-white"
             >
               <span className="material-symbols-outlined text-[18px]">settings</span>
@@ -2604,7 +2610,7 @@ const FitnessHub: React.FC = () => {
             <p className="text-text-muted mt-0.5 font-medium text-xs">Configure your tracking preferences</p>
           </div>
           <button
-            onClick={() => setCurrentView('measurements')}
+            onClick={() => navigate('/fitness/measurements')}
             className="bg-white dark:bg-surface-dark px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm border border-gray-100 dark:border-gray-800 flex items-center gap-1 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all text-text-main dark:text-white"
           >
             <span className="material-symbols-outlined text-[16px]">arrow_back</span>
@@ -2617,7 +2623,7 @@ const FitnessHub: React.FC = () => {
             onSubmit={(e) => {
               e.preventDefault();
               handleSaveSettings(new FormData(e.currentTarget));
-              setCurrentView('measurements');
+              navigate('/fitness/measurements');
             }}
             className="space-y-5"
           >
@@ -2730,7 +2736,7 @@ const FitnessHub: React.FC = () => {
             <div className="pt-2 flex gap-3">
               <button
                 type="button"
-                onClick={() => setCurrentView('measurements')}
+                onClick={() => navigate('/fitness/measurements')}
                 className="flex-1 h-10 rounded-xl border border-gray-100 dark:border-gray-800 font-bold text-xs hover:bg-gray-50 dark:hover:bg-gray-800 transition-all text-text-main dark:text-white"
               >
                 Cancel
@@ -2762,7 +2768,7 @@ const FitnessHub: React.FC = () => {
               <p className="text-text-muted mt-1 font-medium text-lg">Track your transformative fasting journey</p>
             </div>
             <button
-              onClick={() => setCurrentView('overview')}
+              onClick={() => navigate('/fitness/overview')}
               className="px-6 py-3 rounded-2xl border border-gray-200 dark:border-gray-800 font-bold hover:bg-gray-50 dark:hover:bg-gray-800 transition-all flex items-center gap-2"
             >
               <span className="material-symbols-outlined text-[20px]">arrow_back</span>
@@ -2855,7 +2861,7 @@ const FitnessHub: React.FC = () => {
           </div>
           <div className="flex gap-3">
             <button
-              onClick={() => setCurrentView('overview')}
+              onClick={() => navigate('/fitness/overview')}
               className="px-6 py-3 rounded-2xl border border-gray-200 dark:border-gray-800 font-bold hover:bg-gray-50 dark:hover:bg-gray-800 transition-all flex items-center gap-2"
             >
               <span className="material-symbols-outlined text-[20px]">arrow_back</span>
@@ -2888,7 +2894,7 @@ const FitnessHub: React.FC = () => {
                   saveFastingHistory(newHistory);
                   saveFastingSession(null);
 
-                  setCurrentView('overview');
+                  navigate('/fitness/overview');
                 }
               }}
               className="px-6 py-3 rounded-2xl bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 font-bold hover:bg-red-100 dark:hover:bg-red-950/30 transition-all flex items-center gap-2"
