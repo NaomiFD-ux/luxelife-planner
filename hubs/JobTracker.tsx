@@ -664,6 +664,10 @@ const JobTracker: React.FC = () => {
             ? timelineItem.date
             : `${timelineItem.date}, ${currentYear}`;
           const parsedDate = new Date(dateStr);
+
+          // Skip if date is invalid
+          if (isNaN(parsedDate.getTime())) return;
+
           const formattedDate = parsedDate.toISOString().split('T')[0];
 
           addEvent({
