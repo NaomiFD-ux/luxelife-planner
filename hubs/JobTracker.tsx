@@ -66,6 +66,7 @@ interface ResumeDoc {
   usageCount: number;
   lastUpdated: string;
   category: string;
+  fileUrl?: string;
 }
 
 interface CoverLetterDoc {
@@ -75,13 +76,15 @@ interface CoverLetterDoc {
   tags: string[];
   lastUpdated: string;
   linkedApp?: string;
+  fileUrl?: string;
 }
 
 interface VaultDoc {
   id: string;
   title: string;
-  type: 'Reference' | 'Certificate' | 'Offer Letter' | 'Transcript' | 'Writing Sample';
+  type: 'Reference' | 'Certificate' | 'Offer Letter' | 'Transcript' | 'Writing Sample' | 'Portfolio';
   dateAdded: string;
+  fileUrl?: string;
 }
 
 const JobTracker: React.FC = () => {
@@ -148,6 +151,7 @@ const JobTracker: React.FC = () => {
   const [showCoverLetterModal, setShowCoverLetterModal] = useState(false);
   const [showVaultModal, setShowVaultModal] = useState(false);
   const [editingDoc, setEditingDoc] = useState<any>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ type: 'resume' | 'cover-letter' | 'vault'; doc: ResumeDoc | CoverLetterDoc | VaultDoc } | null>(null);
 
   // Document form states
   const [resumeForm, setResumeForm] = useState<Partial<ResumeDoc>>({ title: '', tags: [], category: 'Creative', isDefault: false });
@@ -1430,7 +1434,7 @@ const JobTracker: React.FC = () => {
         {activeDocTab === 'resumes' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 animate-in slide-in-from-bottom-4">
              {resumes.map((doc) => (
-               <div key={doc.id} className="bg-white dark:bg-surface-dark p-8 rounded-[40px] border border-gray-100 dark:border-gray-800 shadow-sm group hover:border-primary/30 transition-all cursor-pointer flex flex-col justify-between">
+               <div key={doc.id} onClick={() => setViewingDoc({ type: 'resume', doc })} className="bg-white dark:bg-surface-dark p-8 rounded-[40px] border border-gray-100 dark:border-gray-800 shadow-sm group hover:border-primary/30 transition-all cursor-pointer flex flex-col justify-between">
                   <div>
                     <div className="flex justify-between items-start mb-6">
                        <div className="size-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shadow-inner">
@@ -1448,7 +1452,7 @@ const JobTracker: React.FC = () => {
                        ))}
                     </div>
                   </div>
-                  
+
                   <div className="pt-8 border-t border-gray-50 dark:border-gray-800/50">
                     <div className="flex items-center justify-between mb-6">
                        <div className="flex flex-col">
@@ -1461,8 +1465,8 @@ const JobTracker: React.FC = () => {
                        </div>
                     </div>
                     <div className="flex gap-2">
-                       <button onClick={() => { setEditingDoc(doc); setResumeForm(doc); setResumeFile(null); setShowResumeModal(true); }} className="flex-1 py-3 rounded-xl bg-background-light dark:bg-background-dark text-[10px] font-black uppercase tracking-widest hover:bg-primary/10 hover:text-primary transition-all text-text-muted">Edit Details</button>
-                       <button className="size-11 flex items-center justify-center rounded-xl bg-background-light dark:bg-background-dark text-text-muted hover:bg-primary/10 hover:text-primary transition-all"><span className="material-symbols-outlined text-sm">download</span></button>
+                       <button onClick={(e) => { e.stopPropagation(); setEditingDoc(doc); setResumeForm(doc); setResumeFile(null); setShowResumeModal(true); }} className="flex-1 py-3 rounded-xl bg-background-light dark:bg-background-dark text-[10px] font-black uppercase tracking-widest hover:bg-primary/10 hover:text-primary transition-all text-text-muted">Edit Details</button>
+                       <button onClick={(e) => { e.stopPropagation(); if (doc.fileUrl) window.open(doc.fileUrl, '_blank'); }} className="size-11 flex items-center justify-center rounded-xl bg-background-light dark:bg-background-dark text-text-muted hover:bg-primary/10 hover:text-primary transition-all"><span className="material-symbols-outlined text-sm">download</span></button>
                     </div>
                   </div>
                </div>
@@ -2589,6 +2593,128 @@ const JobTracker: React.FC = () => {
               >
                 Save Changes
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Document Viewer Modal */}
+      {viewingDoc && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-surface-dark rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center gap-4">
+                <div className="size-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                  <span className="material-symbols-outlined text-2xl">
+                    {viewingDoc.type === 'resume' ? 'description' : viewingDoc.type === 'cover-letter' ? 'mail' : 'file_present'}
+                  </span>
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-text-main dark:text-white">{viewingDoc.doc.title}</h3>
+                  <p className="text-sm text-text-muted capitalize">{viewingDoc.type.replace('-', ' ')}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {viewingDoc.doc.fileUrl && (
+                  <>
+                    <button
+                      onClick={() => window.open(viewingDoc.doc.fileUrl, '_blank')}
+                      className="px-4 py-2 bg-primary text-white rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-primary/90 transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-lg">open_in_new</span>
+                      Open in New Tab
+                    </button>
+                    <a
+                      href={viewingDoc.doc.fileUrl}
+                      download
+                      className="size-10 flex items-center justify-center rounded-xl bg-background-light dark:bg-background-dark text-text-muted hover:text-primary transition-colors"
+                    >
+                      <span className="material-symbols-outlined">download</span>
+                    </a>
+                  </>
+                )}
+                <button
+                  onClick={() => setViewingDoc(null)}
+                  className="size-10 flex items-center justify-center rounded-xl hover:bg-background-light dark:hover:bg-background-dark transition-colors"
+                >
+                  <span className="material-symbols-outlined text-text-muted">close</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-auto p-6">
+              {viewingDoc.doc.fileUrl ? (
+                <iframe
+                  src={viewingDoc.doc.fileUrl}
+                  className="w-full h-full min-h-[500px] rounded-xl border border-gray-100 dark:border-gray-800"
+                  title={viewingDoc.doc.title}
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center">
+                  <div className="size-20 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-6">
+                    <span className="material-symbols-outlined text-4xl text-text-muted">upload_file</span>
+                  </div>
+                  <h4 className="text-lg font-bold text-text-main dark:text-white mb-2">No Document Uploaded</h4>
+                  <p className="text-sm text-text-muted mb-6 max-w-sm">
+                    This {viewingDoc.type.replace('-', ' ')} doesn't have a file attached yet. Upload a document to view it here.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setViewingDoc(null);
+                      if (viewingDoc.type === 'resume') {
+                        setEditingDoc(viewingDoc.doc);
+                        setResumeForm(viewingDoc.doc as ResumeDoc);
+                        setShowResumeModal(true);
+                      } else if (viewingDoc.type === 'cover-letter') {
+                        setEditingDoc(viewingDoc.doc);
+                        setCoverLetterForm(viewingDoc.doc as CoverLetterDoc);
+                        setShowCoverLetterModal(true);
+                      }
+                    }}
+                    className="px-6 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-colors"
+                  >
+                    Upload Document
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Footer with metadata */}
+            <div className="p-6 border-t border-gray-100 dark:border-gray-800 bg-background-light dark:bg-background-dark rounded-b-2xl">
+              <div className="flex flex-wrap gap-6">
+                {'tags' in viewingDoc.doc && viewingDoc.doc.tags && viewingDoc.doc.tags.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2">Tags</p>
+                    <div className="flex flex-wrap gap-2">
+                      {viewingDoc.doc.tags.map((tag: string) => (
+                        <span key={tag} className="text-xs font-bold px-3 py-1 rounded-lg bg-white dark:bg-surface-dark border border-gray-100 dark:border-gray-700 text-text-main dark:text-white">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {'category' in viewingDoc.doc && (
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2">Category</p>
+                    <span className="text-sm font-bold text-text-main dark:text-white">{(viewingDoc.doc as ResumeDoc).category}</span>
+                  </div>
+                )}
+                {'usageCount' in viewingDoc.doc && (
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2">Used In</p>
+                    <span className="text-sm font-bold text-text-main dark:text-white">{(viewingDoc.doc as ResumeDoc).usageCount} Applications</span>
+                  </div>
+                )}
+                {'lastUpdated' in viewingDoc.doc && (
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-text-muted mb-2">Last Updated</p>
+                    <span className="text-sm font-bold text-text-main dark:text-white">{(viewingDoc.doc as ResumeDoc).lastUpdated}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
