@@ -2635,6 +2635,23 @@ const JobTracker: React.FC = () => {
                   </>
                 )}
                 <button
+                  onClick={() => {
+                    if (confirm(`Are you sure you want to delete "${viewingDoc.doc.title}"?`)) {
+                      if (viewingDoc.type === 'resume') {
+                        setResumes(prev => prev.filter(r => r.id !== viewingDoc.doc.id));
+                      } else if (viewingDoc.type === 'cover-letter') {
+                        setCoverLetters(prev => prev.filter(c => c.id !== viewingDoc.doc.id));
+                      } else if (viewingDoc.type === 'vault') {
+                        setVaultDocs(prev => prev.filter(v => v.id !== viewingDoc.doc.id));
+                      }
+                      setViewingDoc(null);
+                    }
+                  }}
+                  className="size-10 flex items-center justify-center rounded-xl bg-red-50 dark:bg-red-950/20 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+                >
+                  <span className="material-symbols-outlined">delete</span>
+                </button>
+                <button
                   onClick={() => setViewingDoc(null)}
                   className="size-10 flex items-center justify-center rounded-xl hover:bg-background-light dark:hover:bg-background-dark transition-colors"
                 >
